@@ -60,7 +60,6 @@
 use crate::core::state_graph::StateGraph;
 use crate::{AgentNode, AgentState, LangGraphError};
 use futures::future::join_all;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Sender, channel};
@@ -261,8 +260,7 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
 ) -> Result<(), ()> {
     let start_time = Instant::now();
 
-    let mut current = HashSet::new();
-    current.insert(graph.start_node.clone());
+    let mut current = graph.start_nodes.clone();
 
     let mut step_count: usize = 0;
     let max_steps = graph.max_steps;
@@ -283,35 +281,20 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
         if current.is_empty() {
             break;
         }
-
-        let is_start = graph.is_start_node(&current);
-
-        if !is_start {
-            let node_names: Vec<String> = current.iter().cloned().collect();
-            emit(
-                &tx,
-                StreamEvent::StepStarted {
-                    step: step_count,
-                    nodes: node_names,
-                },
-            )
-            .await?;
-            let nodes = match graph.get_node_by_keys(&current) {
-                Ok(n) => n,
-                Err(e) => return fail(&tx, &state, step_count, e).await,
-            };
-            if nodes.is_empty() {
-                return fail(
-                    &tx,
-                    &state,
-                    step_count,
-                    LangGraphError::NotFound(format!(
-                        "Dead-end: nodes {:?} have no find by keys",
-                        current
-                    )),
-                )
-                .await;
-            }
+        
+        let node_names: Vec<String> = current.iter().cloned().collect();
+        emit(
+            &tx,
+            StreamEvent::StepStarted {
+                step: step_count,
+                nodes: node_names,
+            },
+        ).await?;
+        let nodes = match graph.get_node_by_keys(&current) {
+            Ok(n) => n,
+            Err(e) => return fail(&tx, &state, step_count, e).await,
+        };
+        if !nodes.is_empty() {
             // Run the nodes concurrently, emitting NodeStarted / NodeFinished
             // for each node at its real start/finish moment.
             let node_names: Vec<String> = current.iter().cloned().collect();
@@ -321,35 +304,36 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
             {
                 return fail(&tx, &state, step_count, e).await;
             }
+
+
+            let next = match graph
+                .get_next_node_key(&current, state.as_ref())
+                .and_then(|n| {
+                    if n.is_empty() {
+                        Err(LangGraphError::GraphError(format!(
+                            "Dead-end: nodes {:?} have no outgoing edges",
+                            current
+                        )))
+                    } else {
+                        Ok(n)
+                    }
+                }) {
+                Ok(n) => n,
+                Err(e) => return fail(&tx, &state, step_count, e).await,
+            };
+
+            emit(
+                &tx,
+                StreamEvent::RoutingDecision {
+                    step: step_count,
+                    from_nodes: current.iter().cloned().collect(),
+                    to_nodes: next.iter().cloned().collect(),
+                },
+            )
+                .await?;
+
+            current = next;
         }
-
-        let next = match graph
-            .get_next_node_key(&current, state.as_ref())
-            .and_then(|n| {
-                if n.is_empty() {
-                    Err(LangGraphError::GraphError(format!(
-                        "Dead-end: nodes {:?} have no outgoing edges",
-                        current
-                    )))
-                } else {
-                    Ok(n)
-                }
-            }) {
-            Ok(n) => n,
-            Err(e) => return fail(&tx, &state, step_count, e).await,
-        };
-
-        emit(
-            &tx,
-            StreamEvent::RoutingDecision {
-                step: step_count,
-                from_nodes: current.iter().cloned().collect(),
-                to_nodes: next.iter().cloned().collect(),
-            },
-        )
-        .await?;
-
-        current = next;
     }
 
     if !reached_end {

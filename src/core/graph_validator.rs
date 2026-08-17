@@ -37,7 +37,7 @@ pub struct ValidatedGraph<S: AgentState + Send + Sync> {
     pub nodes: HashMap<String, Box<dyn AgentNode<S>>>,
     pub edges: HashMap<String, HashSet<String>>,
     pub conditional_edges: HashMap<String, Vec<RouterFn<S>>>,
-    pub start_node: String,
+    pub start_nodes: HashSet<String>,
     pub end_node: String,
 }
 
@@ -51,7 +51,7 @@ pub struct GraphValidator<S: AgentState + Send + Sync> {
     pub nodes: HashMap<String, Box<dyn AgentNode<S>>>,
     pub edges: HashMap<String, HashSet<String>>,
     pub conditional_edges: HashMap<String, Vec<RouterFn<S>>>,
-    pub start_node: String,
+    pub start_nodes: HashSet<String>,
     pub end_node: String,
 }
 
@@ -65,26 +65,26 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
     ///   descriptive message.
     pub fn validate(self) -> Result<ValidatedGraph<S>, LangGraphError> {
         Self::validate_max_steps(self.max_steps)?;
-        Self::validate_start_end_nodes(&self.start_node, &self.end_node)?;
+        Self::validate_start_end_nodes(&self.start_nodes, &self.end_node)?;
         Self::validate_nodes_exist(&self.nodes)?;
         Self::validate_node_names_not_empty(&self.nodes)?;
-        Self::validate_start_not_in_nodes(&self.start_node, &self.nodes)?;
-        Self::validate_start_end_different(&self.start_node, &self.end_node)?;
+        Self::validate_start_not_in_nodes(&self.start_nodes, &self.nodes)?;
+        Self::validate_start_end_different(&self.start_nodes, &self.end_node)?;
         Self::validate_start_has_outgoing_edges(
-            &self.start_node,
+            &self.start_nodes,
             &self.edges,
             &self.conditional_edges,
         )?;
         Self::validate_static_edges_valid(
             &self.edges,
             &self.nodes,
-            &self.start_node,
+            &self.start_nodes,
             &self.end_node,
         )?;
         Self::validate_conditional_edges_valid(
             &self.conditional_edges,
             &self.nodes,
-            &self.start_node,
+            &self.start_nodes,
         )?;
         Self::validate_no_mixed_edge_types(&self.edges, &self.conditional_edges)?;
 
@@ -93,7 +93,7 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
             nodes: self.nodes,
             edges: self.edges,
             conditional_edges: self.conditional_edges,
-            start_node: self.start_node,
+            start_nodes: self.start_nodes,
             end_node: self.end_node,
         })
     }
@@ -107,11 +107,18 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
         Ok(())
     }
 
-    fn validate_start_end_nodes(start_node: &str, end_node: &str) -> Result<(), LangGraphError> {
-        if start_node.is_empty() {
+    fn validate_start_end_nodes(start_nodes: &HashSet<String>, end_node: &str) -> Result<(), LangGraphError> {
+        if start_nodes.is_empty() {
             return Err(LangGraphError::GraphError(
-                "Start node cannot be empty".to_string(),
+                "Start node set cannot be empty".to_string(),
             ));
+        }
+        for start in start_nodes {
+            if start.is_empty() {
+                return Err(LangGraphError::GraphError(
+                    "Start node cannot be empty".to_string(),
+                ));
+            }
         }
         if end_node.is_empty() {
             return Err(LangGraphError::GraphError(
@@ -146,42 +153,48 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
     }
 
     fn validate_start_not_in_nodes(
-        start_node: &str,
+        start_nodes: &HashSet<String>,
         nodes: &HashMap<String, Box<dyn AgentNode<S>>>,
     ) -> Result<(), LangGraphError> {
-        if nodes.contains_key(start_node) {
-            return Err(LangGraphError::GraphError(format!(
-                "Start node '{}' cannot be a normal node",
-                start_node
-            )));
+        for start in start_nodes {
+            if nodes.contains_key(start) {
+                return Err(LangGraphError::GraphError(format!(
+                    "Start node '{}' cannot be a normal node",
+                    start
+                )));
+            }
         }
         Ok(())
     }
 
     fn validate_start_end_different(
-        start_node: &str,
+        start_nodes: &HashSet<String>,
         end_node: &str,
     ) -> Result<(), LangGraphError> {
-        if start_node == end_node {
-            return Err(LangGraphError::GraphError(
-                "Start node and end node cannot be the same".to_string(),
-            ));
+        for start in start_nodes {
+            if start == end_node {
+                return Err(LangGraphError::GraphError(
+                    "Start node and end node cannot be the same".to_string(),
+                ));
+            }
         }
         Ok(())
     }
 
     fn validate_start_has_outgoing_edges(
-        start_node: &str,
+        start_nodes: &HashSet<String>,
         edges: &HashMap<String, HashSet<String>>,
         conditional_edges: &HashMap<String, Vec<RouterFn<S>>>,
     ) -> Result<(), LangGraphError> {
-        let start_has_edge =
-            edges.contains_key(start_node) || conditional_edges.contains_key(start_node);
-        if !start_has_edge {
-            return Err(LangGraphError::GraphError(format!(
-                "Start node '{}' must have at least one outgoing edge",
-                start_node
-            )));
+        for start_node in start_nodes {
+            let start_has_edge =
+                edges.contains_key(start_node) || conditional_edges.contains_key(start_node);
+            if !start_has_edge {
+                return Err(LangGraphError::GraphError(format!(
+                    "Start node '{}' must have at least one outgoing edge",
+                    start_node
+                )));
+            }
         }
         Ok(())
     }
@@ -189,18 +202,18 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
     fn validate_static_edges_valid(
         edges: &HashMap<String, HashSet<String>>,
         nodes: &HashMap<String, Box<dyn AgentNode<S>>>,
-        start_node: &str,
+        start_nodes: &HashSet<String>,
         end_node: &str,
     ) -> Result<(), LangGraphError> {
         for (from, targets) in edges {
-            if from != start_node && from != end_node && !nodes.contains_key(from) {
+            if !start_nodes.contains(from) && from != end_node && !nodes.contains_key(from) {
                 return Err(LangGraphError::GraphError(format!(
                     "Static edge source '{}' is not a registered node",
                     from
                 )));
             }
             for target in targets {
-                if target != start_node && target != end_node && !nodes.contains_key(target) {
+                if !start_nodes.contains(target) && target != end_node && !nodes.contains_key(target) {
                     return Err(LangGraphError::GraphError(format!(
                         "Static edge target '{}' (from '{}') is not a registered node",
                         target, from
@@ -214,10 +227,10 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
     fn validate_conditional_edges_valid(
         conditional_edges: &HashMap<String, Vec<RouterFn<S>>>,
         nodes: &HashMap<String, Box<dyn AgentNode<S>>>,
-        start_node: &str,
+        start_nodes: &HashSet<String>,
     ) -> Result<(), LangGraphError> {
         for from in conditional_edges.keys() {
-            if from != start_node && !nodes.contains_key(from) {
+            if !start_nodes.contains(from) && !nodes.contains_key(from) {
                 return Err(LangGraphError::GraphError(format!(
                     "Conditional edge source '{}' is not a registered node",
                     from

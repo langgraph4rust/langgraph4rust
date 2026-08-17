@@ -122,8 +122,8 @@ pub struct StateGraph<S: AgentState + Send + Sync> {
     edges: HashMap<String, HashSet<String>>,
     /// Conditional edges: source node -> list of router functions
     conditional_edges: HashMap<String, Vec<RouterFn<S>>>,
-    /// Entry point node name
-    pub(crate) start_node: String,
+    /// Entry point node set (supports multiple start nodes for replay/batch)
+    pub(crate) start_nodes: HashSet<String>,
     /// Termination node name
     pub(crate) end_node: String,
     /// Maximum steps before forced termination (safety limit)
@@ -142,7 +142,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// * `nodes` - Validated map of node names to implementations
     /// * `edges` - Validated static edge definitions
     /// * `conditional_edges` - Validated conditional edge definitions
-    /// * `start_node` - Start node identifier
+    /// * `start_nodes` - Set of start node identifiers
     /// * `end_node` - End node identifier
     ///
     /// # Safety
@@ -154,7 +154,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
         nodes: HashMap<String, Box<dyn AgentNode<S>>>,
         edges: HashMap<String, HashSet<String>>,
         conditional_edges: HashMap<String, Vec<RouterFn<S>>>,
-        start_node: String,
+        start_nodes: HashSet<String>,
         end_node: String,
     ) -> Self {
         StateGraph {
@@ -162,7 +162,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
             nodes,
             edges,
             conditional_edges,
-            start_node,
+            start_nodes,
             end_node,
         }
     }
@@ -339,8 +339,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// - Node implementation panics (caught and converted to error)
     /// - Internal logic errors (indicates bug in langgraph4rust itself)
     pub async fn invoke(&self, state: Arc<S>) -> Result<(), LangGraphError> {
-        let mut current = HashSet::new();
-        current.insert(self.start_node.to_string());
+        let mut current = self.start_nodes.clone();
 
         let mut step_count: usize = 0;
         let max_steps = self.max_steps;
@@ -356,14 +355,9 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
             if current.is_empty() {
                 break;
             }
-            if !self.is_start_node(&current) {
-                let nodes = self.get_node_by_keys(&current)?;
-                if nodes.is_empty() {
-                    return Err(LangGraphError::NotFound(format!(
-                        "Dead-end: nodes {:?} have no find by keys",
-                        current
-                    )));
-                }
+
+            let nodes = self.get_node_by_keys(&current)?;
+            if !nodes.is_empty() {
                 self.batch_apply(nodes, Arc::clone(&state)).await?;
             }
             let next = self.get_next_node_key(&current, state.as_ref())?;
@@ -417,12 +411,12 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
         Ok(nodes)
     }
 
-    /// Check if any of the provided keys matches the start node.
+    /// Check if any of the provided keys matches a start node.
     pub(crate) fn is_start_node(&self, keys: &HashSet<String>) -> bool {
         if keys.is_empty() {
             return false;
         }
-        keys.contains(&self.start_node)
+        keys.iter().any(|k| self.start_nodes.contains(k))
     }
 
     /// Check if any of the provided keys matches the end node.

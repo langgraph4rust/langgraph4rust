@@ -190,8 +190,8 @@ pub struct StateGraphBuilder<S: AgentState + Send + Sync> {
     edges: HashMap<String, HashSet<String>>,
     /// Conditional edges mapping source -> list of router functions
     conditional_edges: HashMap<String, Vec<RouterFn<S>>>,
-    /// Start node identifier (defaults to START_NODE)
-    start_node: String,
+    /// Start node set (defaults to {START_NODE})
+    start_nodes: HashSet<String>,
     /// End node identifier (defaults to END_NODE)
     end_node: String,
     /// Maximum execution steps before forced termination
@@ -231,7 +231,7 @@ impl<S: AgentState + Send + Sync> StateGraphBuilder<S> {
             nodes: Default::default(),
             edges: Default::default(),
             conditional_edges: Default::default(),
-            start_node: START_NODE.to_string(),
+            start_nodes: HashSet::from([START_NODE.to_string()]),
             end_node: END_NODE.to_string(),
         }
     }
@@ -451,6 +451,7 @@ impl<S: AgentState + Send + Sync> StateGraphBuilder<S> {
     ///
     /// By default, all workflows begin at [`START_NODE`] (`"__start__"`).
     /// Use this method to specify a different entry point if needed.
+    /// This replaces any previously set start nodes.
     ///
     /// # Arguments
     ///
@@ -487,7 +488,49 @@ impl<S: AgentState + Send + Sync> StateGraphBuilder<S> {
     /// builder.set_start_node("custom_entry");
     /// ```
     pub fn set_start_node(&mut self, start_node: &str) -> &mut Self {
-        self.start_node = start_node.to_string();
+        self.start_nodes = HashSet::from([start_node.to_string()]);
+        self
+    }
+
+    /// Add an additional start node to the graph.
+    ///
+    /// Multiple start nodes allow batch execution or replay from multiple
+    /// entry points. The default start node ([`START_NODE`]) is always
+    /// included unless replaced via [`set_start_node()`](Self::set_start_node).
+    ///
+    /// # Arguments
+    ///
+    /// * `start_node` - Name of an additional entry point node
+    ///
+    /// # Returns
+    ///
+    /// `&mut self` for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use langgraph4rust::*;
+    /// # use std::sync::Arc;
+    /// # #[derive(Clone)]
+    /// # struct EntryA;
+    /// # #[derive(Clone)]
+    /// # struct EntryB;
+    /// # #[async_trait]
+    /// # impl AgentNode<DefaultMemoryState> for EntryA {
+    /// #     async fn apply(&self, _state: Arc<DefaultMemoryState>) -> Result<(), LangGraphError> { Ok(()) }
+    /// # }
+    /// # #[async_trait]
+    /// # impl AgentNode<DefaultMemoryState> for EntryB {
+    /// #     async fn apply(&self, _state: Arc<DefaultMemoryState>) -> Result<(), LangGraphError> { Ok(()) }
+    /// # }
+    /// let mut builder = StateGraphBuilder::<DefaultMemoryState>::new();
+    /// builder.add_node("entry_a", Box::new(EntryA))
+    ///     .add_node("entry_b", Box::new(EntryB))
+    ///     .set_start_node("entry_a")
+    ///     .add_start_node("entry_b");
+    /// ```
+    pub fn add_start_node(&mut self, start_node: &str) -> &mut Self {
+        self.start_nodes.insert(start_node.to_string());
         self
     }
 
@@ -626,7 +669,7 @@ impl<S: AgentState + Send + Sync> StateGraphBuilder<S> {
             nodes: self.nodes,
             edges: self.edges,
             conditional_edges: self.conditional_edges,
-            start_node: self.start_node,
+            start_nodes: self.start_nodes,
             end_node: self.end_node,
         };
 
@@ -637,7 +680,7 @@ impl<S: AgentState + Send + Sync> StateGraphBuilder<S> {
             validated.nodes,
             validated.edges,
             validated.conditional_edges,
-            validated.start_node,
+            validated.start_nodes,
             validated.end_node,
         ))
     }
