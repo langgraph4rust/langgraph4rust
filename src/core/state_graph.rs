@@ -382,14 +382,13 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     ///
     /// - `Ok(&Box<dyn AgentNode<S>>)` - Reference to the node implementation
     /// - `Err(LangGraphError::NotFound)` - If node name doesn't exist
-    fn get_node_by_key(&self, key: &String) -> Result<&dyn AgentNode<S>, LangGraphError> {
-        self.nodes
-            .get(key)
-            .ok_or_else(|| LangGraphError::NotFound(format!("Key '{}' not found", key)))
-            .map(|node| node.as_ref())
+    fn get_node_by_key(&self, key: &String) -> Option<&dyn AgentNode<S>> {
+        self.nodes.get(key).map(|node| node.as_ref())
     }
 
     /// Retrieve multiple node references by their names.
+    ///
+    /// Silently skips keys that are not registered nodes (e.g. virtual start markers).
     ///
     /// # Arguments
     ///
@@ -398,15 +397,15 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// # Returns
     ///
     /// - `Ok(Vec<&Box<dyn AgentNode<S>>>)` - Vector of node references
-    /// - `Err(LangGraphError::NotFound)` - If any node name doesn't exist
     pub(crate) fn get_node_by_keys(
         &self,
         keys: &HashSet<String>,
     ) -> Result<Vec<&dyn AgentNode<S>>, LangGraphError> {
         let mut nodes = Vec::new();
         for key in keys {
-            let node = self.get_node_by_key(key)?;
-            nodes.push(node);
+            if let Some(node) = self.get_node_by_key(key) {
+                nodes.push(node);
+            }
         }
         Ok(nodes)
     }
