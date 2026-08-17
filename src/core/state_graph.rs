@@ -410,13 +410,6 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
         Ok(nodes)
     }
 
-    /// Check if any of the provided keys matches a start node.
-    pub(crate) fn is_start_node(&self, keys: &HashSet<String>) -> bool {
-        if keys.is_empty() {
-            return false;
-        }
-        keys.iter().any(|k| self.start_nodes.contains(k))
-    }
 
     /// Check if any of the provided keys matches the end node.
     pub(crate) fn is_end_node(&self, keys: &HashSet<String>) -> bool {
