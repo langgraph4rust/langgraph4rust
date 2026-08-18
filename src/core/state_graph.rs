@@ -359,15 +359,10 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
             let nodes = self.get_node_by_keys(&current)?;
             if !nodes.is_empty() {
                 self.batch_apply(nodes, Arc::clone(&state)).await?;
+                current = self.get_next_node_key(&current, state.as_ref())?;
+            } else {
+                break
             }
-            let next = self.get_next_node_key(&current, state.as_ref())?;
-            if next.is_empty() {
-                return Err(LangGraphError::GraphError(format!(
-                    "Dead-end: nodes {:?} have no outgoing edges",
-                    current
-                )));
-            }
-            current = next;
         }
         Ok(())
     }
