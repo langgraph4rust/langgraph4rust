@@ -68,7 +68,6 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
         Self::validate_start_end_nodes(&self.start_nodes, &self.end_node)?;
         Self::validate_nodes_exist(&self.nodes)?;
         Self::validate_node_names_not_empty(&self.nodes)?;
-        Self::validate_start_not_in_nodes(&self.start_nodes, &self.nodes)?;
         Self::validate_start_end_different(&self.start_nodes, &self.end_node)?;
         Self::validate_start_has_outgoing_edges(
             &self.start_nodes,
@@ -147,21 +146,6 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
                 return Err(LangGraphError::GraphError(
                     "Node name cannot be empty".to_string(),
                 ));
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_start_not_in_nodes(
-        start_nodes: &HashSet<String>,
-        nodes: &HashMap<String, Box<dyn AgentNode<S>>>,
-    ) -> Result<(), LangGraphError> {
-        for start in start_nodes {
-            if nodes.contains_key(start) {
-                return Err(LangGraphError::GraphError(format!(
-                    "Start node '{}' cannot be a normal node",
-                    start
-                )));
             }
         }
         Ok(())
