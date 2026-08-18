@@ -295,8 +295,6 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
             Err(e) => return fail(&tx, &state, step_count, e).await,
         };
         if !nodes.is_empty() {
-            // Run the nodes concurrently, emitting NodeStarted / NodeFinished
-            // for each node at its real start/finish moment.
             let node_names: Vec<String> = current.iter().cloned().collect();
             if let Err(e) =
                 batch_apply_with_events(&tx, &node_names, nodes, Arc::clone(&state), step_count)
@@ -304,36 +302,26 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
             {
                 return fail(&tx, &state, step_count, e).await;
             }
-
-
-            let next = match graph
-                .get_next_node_key(&current, state.as_ref())
-                .and_then(|n| {
-                    if n.is_empty() {
-                        Err(LangGraphError::GraphError(format!(
-                            "Dead-end: nodes {:?} have no outgoing edges",
-                            current
-                        )))
-                    } else {
-                        Ok(n)
-                    }
-                }) {
-                Ok(n) => n,
-                Err(e) => return fail(&tx, &state, step_count, e).await,
-            };
-
-            emit(
-                &tx,
-                StreamEvent::RoutingDecision {
-                    step: step_count,
-                    from_nodes: current.iter().cloned().collect(),
-                    to_nodes: next.iter().cloned().collect(),
-                },
-            )
-                .await?;
-
-            current = next;
         }
+
+        let next = match graph
+            .get_next_node_key(&current, state.as_ref())
+        {
+            Ok(n) => n,
+            Err(e) => return fail(&tx, &state, step_count, e).await,
+        };
+
+        emit(
+            &tx,
+            StreamEvent::RoutingDecision {
+                step: step_count,
+                from_nodes: current.iter().cloned().collect(),
+                to_nodes: next.iter().cloned().collect(),
+            },
+        )
+            .await?;
+
+        current = next;
     }
 
     if !reached_end {
