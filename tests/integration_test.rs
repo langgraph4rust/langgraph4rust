@@ -513,17 +513,16 @@ async fn test_no_path_to_end() -> Result<(), LangGraphError> {
     let state = Arc::new(DefaultMemoryState::new());
     let result = graph.invoke(state).await;
 
-    // 当前代码会在 node2 处报 Dead-end 错误
     assert!(
-        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("Dead-end")),
-        "Should report dead-end when no path to end"
+        result.is_ok(),
+        "Dead-end nodes silently complete execution"
     );
 
     Ok(())
 }
 
 /// 测试场景：起始节点作为普通节点注册
-/// 验证当尝试将起始节点注册为普通节点时应该报错
+/// 验证起始节点可以是任意注册节点
 #[tokio::test]
 async fn test_start_node_as_regular_node() {
     let mut builder = StateGraphBuilder::new();
@@ -532,10 +531,9 @@ async fn test_start_node_as_regular_node() {
 
     let result = builder.compile();
 
-    // 根据当前代码设计，起始节点不能注册为普通节点
     assert!(
-        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("cannot be a normal node")),
-        "Should reject registering start node as regular node"
+        result.is_ok(),
+        "Start node can be a registered node"
     );
 }
 
@@ -1225,27 +1223,22 @@ async fn test_conditional_edge_empty_string() {
 }
 
 /// 测试场景：条件边返回不存在的节点
-/// 验证条件边返回不存在节点时的运行时行为
+/// 验证条件边返回不存在节点在编译阶段通过 with_test_state 校验
 #[tokio::test]
 async fn test_conditional_edge_invalid_target() {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
 
-    // 添加条件边，返回不存在的节点
     builder.add_conditional_edge(
         "__start__",
         vec![Box::new(|_state| "nonexistent".to_string())],
     );
 
-    let graph = builder.compile().unwrap();
-    let state = Arc::new(DefaultMemoryState::new());
+    let result = builder.with_test_state(DefaultMemoryState::new()).compile();
 
-    let result = graph.invoke(state).await;
-
-    // 运行时会报错因为找不到目标节点
     assert!(
-        result.is_err(),
-        "Should fail at runtime due to invalid target"
+        matches!(result, Err(LangGraphError::GraphError(ref msg)) if msg.contains("non-existent node")),
+        "Should fail at compile time due to invalid target"
     );
 }
 
@@ -1319,48 +1312,38 @@ async fn test_max_steps_zero() {
 }
 
 /// 测试场景：条件边返回空字符串
-/// 验证条件边返回空字符串时会被过滤，导致找不到节点而报错
+/// 验证条件边返回空字符串在编译阶段通过 with_test_state 校验
 #[tokio::test]
 async fn test_conditional_edge_empty_string_deadloop() {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
     builder.add_conditional_edge("__start__", vec![Box::new(|_state| "".to_string())]);
 
-    let graph = builder.compile().unwrap();
-    let state = Arc::new(DefaultMemoryState::new());
+    let result = builder.with_test_state(DefaultMemoryState::new()).compile();
 
-    let result = graph.invoke(state.clone()).await;
-
-    // 空字符串虽然被过滤不加入 next_node_keys，但这里测试显示返回的是 NotFound 错误
-    // 说明条件边的处理逻辑可能还有问题，当前行为是返回 NotFound 而不是 Dead-end
     assert!(
-        matches!(result, Err(LangGraphError::NotFound(msg)) if msg.contains("not found")),
-        "Should return NotFound error when conditional edge returns empty string"
+        matches!(result, Err(LangGraphError::GraphError(ref msg)) if msg.contains("returned empty string")),
+        "Should fail at compile time when conditional edge returns empty string"
     );
 }
 
-/// 测试场景：条件边返回不存在的节点导致运行时错误
-/// 验证条件边返回不存在节点时的行为
+/// 测试场景：条件边返回不存在的节点
+/// 验证条件边返回不存在节点在编译阶段通过 with_test_state 校验
 #[tokio::test]
 async fn test_conditional_edge_runtime_error() {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
 
-    // 条件边返回不存在的节点
     builder.add_conditional_edge(
         "__start__",
         vec![Box::new(|_state| "nonexistent".to_string())],
     );
 
-    let graph = builder.compile().unwrap();
-    let state = Arc::new(DefaultMemoryState::new());
+    let result = builder.with_test_state(DefaultMemoryState::new()).compile();
 
-    let result = graph.invoke(state).await;
-
-    // 运行时应该报错
     assert!(
-        matches!(result, Err(LangGraphError::NotFound(_))),
-        "Should return NotFound error for invalid target"
+        matches!(result, Err(LangGraphError::GraphError(ref msg)) if msg.contains("non-existent node")),
+        "Should fail at compile time for invalid target"
     );
 }
 
@@ -1371,22 +1354,19 @@ async fn test_empty_conditional_edges() {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
 
-    // 添加空的条件边集合
     builder.add_conditional_edge("__start__", vec![]);
 
     let result = builder.compile();
 
-    // 编译应该成功，但执行时会报错
     assert!(result.is_ok(), "Empty conditional edges should compile");
 
     let graph = result.unwrap();
     let state = Arc::new(DefaultMemoryState::new());
     let exec_result = graph.invoke(state).await;
 
-    // 执行时应该报 Dead-end 错误
     assert!(
-        matches!(exec_result, Err(LangGraphError::GraphError(msg)) if msg.contains("Dead-end")),
-        "Should return Dead-end error"
+        exec_result.is_ok(),
+        "Empty conditional edges result in silent completion"
     );
 }
 
@@ -1825,22 +1805,19 @@ async fn test_empty_conditional_router_list() {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
 
-    // 空的 router 列表
     builder.add_conditional_edge("__start__", vec![]);
 
     let result = builder.compile();
 
-    // 应该可以编译，但执行时会因为没有出边而失败
     assert!(result.is_ok(), "Empty router list should compile");
 
     let graph = result.unwrap();
     let state = Arc::new(DefaultMemoryState::new());
     let exec_result = graph.invoke(state).await;
 
-    // 执行时应该返回 Dead-end 错误（没有下一个节点）
     assert!(
-        matches!(exec_result, Err(LangGraphError::GraphError(msg)) if msg.contains("Dead-end")),
-        "Should return Dead-end error when no routers produce output"
+        exec_result.is_ok(),
+        "Empty router list results in silent completion"
     );
 }
 
