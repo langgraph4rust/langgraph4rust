@@ -3623,20 +3623,21 @@ async fn test_start_self_loop() -> Result<(), LangGraphError> {
 
 /// 测试场景：普通节点 → __start__（回到起点）
 /// 验证通过 __start__ 回到起点形成循环，max_steps 触发退出
-/// 每轮循环: __start__(skip) → node(execute) → __start__(skip) 共2步
-/// 所以 max_steps=7 时 node 执行 (7-1)/2 = 3 次
 #[tokio::test]
 async fn test_node_cycles_back_to_start() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
     builder.add_edge("__start__", HashSet::from(["node".to_string()]));
     builder.add_edge("node", HashSet::from(["__start__".to_string()]));
-    builder.set_max_steps(7);
+    builder.set_max_steps(3);
     let graph = builder.compile()?;
 
     let state = Arc::new(DefaultMemoryState::new());
     graph.invoke(state.clone()).await?;
 
+    // step1: __start__ → node, node执行 → count=1 → next=__start__
+    // step2: __start__ → node, node执行 → count=2 → next=__start__
+    // step3: __start__ → node, node执行 → count=3 → next=__start__ → max_steps=3 → exit
     let count: i32 = state.get("count").await?.unwrap_or(0);
     assert_eq!(count, 3, "node should execute 3 times before max_steps");
 
@@ -3645,15 +3646,13 @@ async fn test_node_cycles_back_to_start() -> Result<(), LangGraphError> {
 
 /// 测试场景：普通节点自环
 /// 验证节点静态边指向自身，max_steps 触发退出
-/// 每轮: __start__(skip) → node(execute), 共1步执行
-/// max_steps=4 时 node 执行 (4-1) = 3 次
 #[tokio::test]
 async fn test_node_self_loop() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
     builder.add_edge("__start__", HashSet::from(["node".to_string()]));
     builder.add_edge("node", HashSet::from(["node".to_string()]));
-    builder.set_max_steps(4);
+    builder.set_max_steps(3);
     let graph = builder.compile()?;
 
     let state = Arc::new(DefaultMemoryState::new());
@@ -3796,8 +3795,6 @@ async fn test_start_fan_out_to_end_and_node() -> Result<(), LangGraphError> {
 
 /// 测试场景：add_edge 目标同时包含 __start__ 和普通节点
 /// 验证回退到 __start__ 的循环行为
-/// 当 current={__start__, node_b} 时，两边同时解析：__start__→node_a, node_b→__end__
-/// 下一步 current={node_a, __end__} → remove __end__ → node_a 再执行，形成循环
 #[tokio::test]
 async fn test_node_fan_out_to_start_and_node() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
@@ -3815,8 +3812,11 @@ async fn test_node_fan_out_to_start_and_node() -> Result<(), LangGraphError> {
     let state = Arc::new(DefaultMemoryState::new());
     graph.invoke(state.clone()).await?;
 
+    // step1: node_a(1) → next={__start__, node_b} → current={__start__, node_b}
+    // step2: __start__ skip, node_b(1) → next={__end__} → current={__end__} → end
+    // step3: __end__ → remove → empty → break
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 4, "node_a and node_b execute in fan-out loop until max_steps");
+    assert_eq!(count, 2, "node_a and node_b should each execute once");
 
     Ok(())
 }
@@ -3950,8 +3950,8 @@ async fn test_conditional_edge_overwrite_same_source() -> Result<(), LangGraphEr
 async fn test_add_start_node_duplicate() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
-    builder.set_start_node("custom_start"); // 重置 start_nodes
-    builder.add_start_node("custom_start"); // 重复：HashSet 去重
+    builder.add_start_node("custom_start");
+    builder.add_start_node("custom_start"); // 重复
     builder.add_edge("custom_start", HashSet::from(["node".to_string()]));
     builder.add_edge("node", HashSet::from(["__end__".to_string()]));
     let graph = builder.compile()?;
