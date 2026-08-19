@@ -3950,8 +3950,8 @@ async fn test_conditional_edge_overwrite_same_source() -> Result<(), LangGraphEr
 async fn test_add_start_node_duplicate() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
     builder.add_node("node", Box::new(CounterNode));
-    builder.add_start_node("custom_start");
-    builder.add_start_node("custom_start"); // 重复
+    builder.set_start_node("custom_start"); // 重置 start_nodes
+    builder.add_start_node("custom_start"); // 重复：HashSet 去重
     builder.add_edge("custom_start", HashSet::from(["node".to_string()]));
     builder.add_edge("node", HashSet::from(["__end__".to_string()]));
     let graph = builder.compile()?;
