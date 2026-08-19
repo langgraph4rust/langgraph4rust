@@ -2290,25 +2290,18 @@ async fn test_stream_node_lookup_failure() -> Result<(), LangGraphError> {
 
     let events = collect_events(graph, Arc::new(DefaultMemoryState::new())).await;
 
-    // 应该收到 WorkflowError，因为 ghost 不是已注册节点
+    // 应该收到 WorkflowError，因为 ghost 不是已注册节点，导致循环无法到达 end_node
     match events.last() {
         Some(StreamEvent::WorkflowError { error, .. }) => {
             let msg = error.to_string();
             assert!(
-                msg.contains("not a registered node") || msg.contains("ghost"),
-                "error should mention missing node, got: {}",
+                msg.contains("Reached max_steps") || msg.contains("ghost"),
+                "error should indicate graph issue, got: {}",
                 msg
             );
         }
         other => {
-            // 也可能因为 ghost 不是注册节点，get_node_by_keys 返回空 Vec
-            // 导致 next 为空，然后 current 为空，循环退出
-            // 这取决于实现细节
-            assert!(
-                matches!(other, Some(StreamEvent::WorkflowFinished { .. })),
-                "should finish or error, got: {:?}",
-                other.map(|_| ())
-            );
+            panic!("expected WorkflowError, got: {:?}", other.map(|_| ()));
         }
     }
     Ok(())

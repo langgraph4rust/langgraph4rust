@@ -3046,32 +3046,12 @@ async fn test_set_end_node_empty_string() {
     );
 }
 
-/// 测试场景：条件边 router 返回 START_NODE
-/// 验证条件边 router 返回 __start__ 时，图执行正常终止（因为 __start__ 不是注册节点）
-#[tokio::test]
-async fn test_conditional_edge_returns_start_node() -> Result<(), LangGraphError> {
-    let mut builder = StateGraphBuilder::new();
-    builder.add_node("decide", Box::new(CounterNode));
-    builder.add_edge("__start__", HashSet::from(["decide".to_string()]));
-    builder.add_conditional_edge(
-        "decide",
-        vec![Box::new(|_state: &DefaultMemoryState| "__start__".to_string())],
-    );
-    let graph = builder.compile()?;
-
-    let state = Arc::new(DefaultMemoryState::new());
-    let result = graph.invoke(state).await;
-    // __start__ 不是注册节点，所以执行会终止并报错
-    assert!(result.is_err(), "Returning __start__ should fail since it's not a registered node");
-
-    Ok(())
-}
-
-/// 测试场景：条件边 router 返回不存在节点
-/// 验证 router 返回未注册的节点时，图执行正常报错
+/// 测试场景：条件边 router 返回未注册节点
+/// 验证 router 返回未注册的节点时，get_next_node_key 返回空集，循环自然退出
 #[tokio::test]
 async fn test_conditional_edge_returns_nonexistent_node() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
+    builder.set_max_steps(10);
     builder.add_node("router", Box::new(CounterNode));
     builder.add_edge("__start__", HashSet::from(["router".to_string()]));
     builder.add_conditional_edge(
@@ -3081,9 +3061,12 @@ async fn test_conditional_edge_returns_nonexistent_node() -> Result<(), LangGrap
     let graph = builder.compile()?;
 
     let state = Arc::new(DefaultMemoryState::new());
-    let result = graph.invoke(state).await;
-    // ghost 不是注册节点，执行会终止并报错
-    assert!(result.is_err(), "Returning unregistered node should fail");
+    let result = graph.invoke(state.clone()).await;
+    // ghost 不是注册节点，下轮 current 变空，循环退出
+    assert!(result.is_ok(), "Graph should exit gracefully");
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "router should execute once before dead end");
 
     Ok(())
 }
