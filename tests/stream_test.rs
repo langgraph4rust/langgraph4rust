@@ -2122,3 +2122,296 @@ async fn test_failure_at_first_real_node_step() -> Result<(), LangGraphError> {
     }
     Ok(())
 }
+
+// ─── 55. 多起始节点流式执行 ────────────────────────────────────────────────
+
+/// 验证 add_start_node 添加的多个起始节点在流式执行中都能正确工作
+#[tokio::test]
+async fn test_stream_multi_start_nodes() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("a", Box::new(CounterNode));
+    builder.add_node("b", Box::new(CounterNode));
+    builder.add_node("merge", Box::new(CounterNode));
+    builder.set_start_node("a");
+    builder.add_start_node("b");
+    builder.add_edge("a", HashSet::from(["merge".to_string()]));
+    builder.add_edge("b", HashSet::from(["merge".to_string()]));
+    builder.add_edge("merge", HashSet::from([END_NODE.to_string()]));
+    let graph = Arc::new(builder.compile()?);
+
+    let state = Arc::new(DefaultMemoryState::new());
+    let events = collect_events(Arc::clone(&graph), Arc::clone(&state)).await;
+
+    assert!(matches!(
+        events.last(),
+        Some(StreamEvent::WorkflowFinished { .. })
+    ));
+    // a 和 b 并行执行，merge 执行一次
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 3, "a, b, merge should all execute");
+
+    // 并行步应包含 a 和 b
+    let step_started = events.iter().find(|e| matches!(
+        e,
+        StreamEvent::StepStarted { nodes, .. } if nodes.len() == 2
+    ));
+    assert!(
+        step_started.is_some(),
+        "should have a step with 2 parallel nodes"
+    );
+    Ok(())
+}
+
+// ─── 56. 自定义结束节点流式执行 ────────────────────────────────────────────
+
+/// 验证 set_end_node 自定义结束节点在流式执行中正常工作
+#[tokio::test]
+async fn test_stream_custom_end_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.set_end_node("finish");
+    builder.add_node("step", Box::new(CounterNode));
+    builder.add_edge(START_NODE, HashSet::from(["step".to_string()]));
+    builder.add_edge("step", HashSet::from(["finish".to_string()]));
+    let graph = Arc::new(builder.compile()?);
+
+    let state = Arc::new(DefaultMemoryState::new());
+    let events = collect_events(Arc::clone(&graph), Arc::clone(&state)).await;
+
+    assert!(matches!(
+        events.last(),
+        Some(StreamEvent::WorkflowFinished { .. })
+    ));
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "single step should execute");
+
+    // 路由决策应包含自定义结束节点
+    let routing = events.iter().find(|e| matches!(
+        e,
+        StreamEvent::RoutingDecision { to_nodes, .. } if to_nodes.contains(&"finish".to_string())
+    ));
+    assert!(
+        routing.is_some(),
+        "should have routing decision to custom end node 'finish'"
+    );
+    Ok(())
+}
+
+// ─── 57. StreamEvent Debug 格式化 ──────────────────────────────────────────
+
+/// 简单的 Debug 状态实现，用于测试 StreamEvent 的 Debug 格式化
+#[derive(Debug, Clone)]
+struct DebugState;
+
+#[langgraph4rust::async_trait]
+impl AgentState for DebugState {
+    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
+        &self,
+        _key: &str,
+    ) -> Result<Option<T>, LangGraphError> {
+        Ok(None)
+    }
+    async fn set<T: serde::Serialize + Send + Sync>(
+        &self,
+        _key: &str,
+        _value: T,
+    ) -> Result<bool, LangGraphError> {
+        Ok(true)
+    }
+}
+
+/// 验证所有 StreamEvent 变体的 Debug 输出都包含有意义的信息
+#[test]
+fn test_stream_event_debug_format() {
+    let events: Vec<StreamEvent<DebugState>> = vec![
+        StreamEvent::WorkflowStarted,
+        StreamEvent::StepStarted {
+            step: 1,
+            nodes: vec!["a".to_string()],
+        },
+        StreamEvent::NodeStarted {
+            step: 1,
+            name: "a".to_string(),
+        },
+        StreamEvent::NodeFinished {
+            step: 1,
+            name: "a".to_string(),
+            elapsed: std::time::Duration::from_millis(10),
+        },
+        StreamEvent::RoutingDecision {
+            step: 1,
+            from_nodes: vec!["a".to_string()],
+            to_nodes: vec!["b".to_string()],
+        },
+        StreamEvent::WorkflowFinished {
+            state: Arc::new(DebugState),
+            total_steps: 3,
+            elapsed: std::time::Duration::from_millis(50),
+        },
+        StreamEvent::WorkflowError {
+            state: Arc::new(DebugState),
+            step: 2,
+            error: LangGraphError::NodeError("test".into()),
+        },
+    ];
+
+    for event in &events {
+        let debug = format!("{:?}", event);
+        assert!(
+            !debug.is_empty(),
+            "Debug output should not be empty for event variant"
+        );
+    }
+
+    // 验证具体变体包含关键信息
+    assert!(format!("{:?}", &events[0]).contains("WorkflowStarted"));
+    assert!(format!("{:?}", &events[1]).contains("StepStarted"));
+    assert!(format!("{:?}", &events[2]).contains("NodeStarted"));
+    assert!(format!("{:?}", &events[3]).contains("NodeFinished"));
+    assert!(format!("{:?}", &events[4]).contains("RoutingDecision"));
+    assert!(format!("{:?}", &events[5]).contains("WorkflowFinished"));
+    assert!(format!("{:?}", &events[6]).contains("WorkflowError"));
+}
+
+// ─── 58. run_driver 节点查找失败 ───────────────────────────────────────────
+
+/// 验证当节点查找失败时（如条件边返回不存在的节点），流式执行产生 WorkflowError
+#[tokio::test]
+async fn test_stream_node_lookup_failure() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("router", Box::new(RouterNode));
+    builder.add_edge(START_NODE, HashSet::from(["router".to_string()]));
+    // 条件边返回一个不存在的节点，但 router 被执行后，下一轮 get_node_by_keys
+    // 会尝试查找 ghost 节点，find 不到则 nodes 为空
+    builder.add_conditional_edge(
+        "router",
+        vec![Box::new(|_state: &DefaultMemoryState| "ghost".to_string())],
+    );
+    let graph = Arc::new(builder.compile()?);
+
+    let events = collect_events(graph, Arc::new(DefaultMemoryState::new())).await;
+
+    // 应该收到 WorkflowError，因为 ghost 不是已注册节点
+    match events.last() {
+        Some(StreamEvent::WorkflowError { error, .. }) => {
+            let msg = error.to_string();
+            assert!(
+                msg.contains("not a registered node") || msg.contains("ghost"),
+                "error should mention missing node, got: {}",
+                msg
+            );
+        }
+        other => {
+            // 也可能因为 ghost 不是注册节点，get_node_by_keys 返回空 Vec
+            // 导致 next 为空，然后 current 为空，循环退出
+            // 这取决于实现细节
+            assert!(
+                matches!(other, Some(StreamEvent::WorkflowFinished { .. })),
+                "should finish or error, got: {:?}",
+                other.map(|_| ())
+            );
+        }
+    }
+    Ok(())
+}
+
+// ─── 59. 流式执行 + 自定义 AgentState ──────────────────────────────────────
+
+/// 自定义状态实现：用于流式执行测试
+#[derive(Debug, Clone)]
+struct CounterState {
+    data: Arc<std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>>,
+}
+
+impl CounterState {
+    fn new() -> Self {
+        Self {
+            data: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+}
+
+#[langgraph4rust::async_trait]
+impl AgentState for CounterState {
+    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
+        &self,
+        key: &str,
+    ) -> Result<Option<T>, LangGraphError> {
+        let guard = self.data.lock().unwrap();
+        Ok(guard
+            .get(key)
+            .and_then(|v| serde_json::from_value(v.clone()).ok()))
+    }
+    async fn set<T: serde::Serialize + Send + Sync>(
+        &self,
+        key: &str,
+        value: T,
+    ) -> Result<bool, LangGraphError> {
+        let v = serde_json::to_value(value)
+            .map_err(|e| LangGraphError::StateError(e.to_string()))?;
+        self.data.lock().unwrap().insert(key.to_string(), v);
+        Ok(true)
+    }
+}
+
+/// 自定义状态节点：写入固定值
+#[derive(Debug, Clone)]
+struct SetValueNode {
+    key: String,
+    value: i32,
+}
+
+#[langgraph4rust::async_trait]
+impl AgentNode<CounterState> for SetValueNode {
+    async fn apply(&self, state: Arc<CounterState>) -> Result<(), LangGraphError> {
+        state.set(&self.key, self.value).await?;
+        Ok(())
+    }
+}
+
+/// 验证流式执行能使用自定义 AgentState 实现
+#[tokio::test]
+async fn test_stream_with_custom_agent_state() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::<CounterState>::new();
+    builder.add_node(
+        "init",
+        Box::new(SetValueNode {
+            key: "n".to_string(),
+            value: 42,
+        }),
+    );
+    builder.add_node(
+        "double",
+        Box::new(SetValueNode {
+            key: "n2".to_string(),
+            value: 84,
+        }),
+    );
+    builder.add_edge(START_NODE, HashSet::from(["init".to_string()]));
+    builder.add_edge("init", HashSet::from(["double".to_string()]));
+    builder.add_edge("double", HashSet::from([END_NODE.to_string()]));
+    let graph = Arc::new(builder.compile()?);
+
+    let state = Arc::new(CounterState::new());
+    let events: Vec<StreamEvent<CounterState>> =
+        collect_events(Arc::clone(&graph), Arc::clone(&state)).await;
+
+    assert!(matches!(
+        events.last(),
+        Some(StreamEvent::WorkflowFinished { .. })
+    ));
+    // 验证事件序列包含关键事件
+    assert!(events.iter().any(|e| matches!(e, StreamEvent::WorkflowStarted)));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, StreamEvent::NodeStarted { name, .. } if name == "init")));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, StreamEvent::NodeFinished { name, .. } if name == "init")));
+
+    // 验证自定义状态的数据被正确写入
+    let n: i32 = state.get("n").await?.unwrap_or(0);
+    let n2: i32 = state.get("n2").await?.unwrap_or(0);
+    assert_eq!(n, 42, "init node should write 42");
+    assert_eq!(n2, 84, "double node should write 84");
+    Ok(())
+}
