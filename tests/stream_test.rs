@@ -2151,10 +2151,12 @@ async fn test_stream_multi_start_nodes() -> Result<(), LangGraphError> {
     assert_eq!(count, 3, "a, b, merge should all execute");
 
     // 并行步应包含 a 和 b
-    let step_started = events.iter().find(|e| matches!(
-        e,
-        StreamEvent::StepStarted { nodes, .. } if nodes.len() == 2
-    ));
+    let step_started = events.iter().find(|e| {
+        matches!(
+            e,
+            StreamEvent::StepStarted { nodes, .. } if nodes.len() == 2
+        )
+    });
     assert!(
         step_started.is_some(),
         "should have a step with 2 parallel nodes"
@@ -2339,8 +2341,8 @@ impl AgentState for CounterState {
         key: &str,
         value: T,
     ) -> Result<bool, LangGraphError> {
-        let v = serde_json::to_value(value)
-            .map_err(|e| LangGraphError::StateError(e.to_string()))?;
+        let v =
+            serde_json::to_value(value).map_err(|e| LangGraphError::StateError(e.to_string()))?;
         self.data.lock().unwrap().insert(key.to_string(), v);
         Ok(true)
     }
@@ -2393,13 +2395,21 @@ async fn test_stream_with_custom_agent_state() -> Result<(), LangGraphError> {
         Some(StreamEvent::WorkflowFinished { .. })
     ));
     // 验证事件序列包含关键事件
-    assert!(events.iter().any(|e| matches!(e, StreamEvent::WorkflowStarted)));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, StreamEvent::NodeStarted { name, .. } if name == "init")));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, StreamEvent::NodeFinished { name, .. } if name == "init")));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::WorkflowStarted))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::NodeStarted { name, .. } if name == "init"))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::NodeFinished { name, .. } if name == "init"))
+    );
 
     // 验证自定义状态的数据被正确写入
     let n: i32 = state.get("n").await?.unwrap_or(0);

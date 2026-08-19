@@ -513,10 +513,7 @@ async fn test_no_path_to_end() -> Result<(), LangGraphError> {
     let state = Arc::new(DefaultMemoryState::new());
     let result = graph.invoke(state).await;
 
-    assert!(
-        result.is_ok(),
-        "Dead-end nodes silently complete execution"
-    );
+    assert!(result.is_ok(), "Dead-end nodes silently complete execution");
 
     Ok(())
 }
@@ -531,10 +528,7 @@ async fn test_start_node_as_regular_node() {
 
     let result = builder.compile();
 
-    assert!(
-        result.is_ok(),
-        "Start node can be a registered node"
-    );
+    assert!(result.is_ok(), "Start node can be a registered node");
 }
 
 /// 测试场景：多个入边的节点
@@ -1310,7 +1304,7 @@ async fn test_max_steps_zero() {
         "Should fail at compile time when max_steps is 0"
     );
 }
-// 
+//
 // /// 测试场景：条件边返回空字符串
 // /// 验证条件边返回空字符串在编译阶段通过 with_test_state 校验
 // #[tokio::test]
@@ -1318,29 +1312,29 @@ async fn test_max_steps_zero() {
 //     let mut builder = StateGraphBuilder::new();
 //     builder.add_node("node", Box::new(CounterNode));
 //     builder.add_conditional_edge("__start__", vec![Box::new(|_state| "".to_string())]);
-// 
+//
 //     let result = builder.with_test_state(DefaultMemoryState::new()).compile();
-// 
+//
 //     assert!(
 //         matches!(result, Err(LangGraphError::GraphError(ref msg)) if msg.contains("returned empty string")),
 //         "Should fail at compile time when conditional edge returns empty string"
 //     );
 // }
-// 
+//
 // /// 测试场景：条件边返回不存在的节点
 // /// 验证条件边返回不存在节点在编译阶段通过 with_test_state 校验
 // #[tokio::test]
 // async fn test_conditional_edge_runtime_error() {
 //     let mut builder = StateGraphBuilder::new();
 //     builder.add_node("node", Box::new(CounterNode));
-// 
+//
 //     builder.add_conditional_edge(
 //         "__start__",
 //         vec![Box::new(|_state| "nonexistent".to_string())],
 //     );
-// 
+//
 //     let result = builder.with_test_state(DefaultMemoryState::new()).compile();
-// 
+//
 //     assert!(
 //         matches!(result, Err(LangGraphError::GraphError(ref msg)) if msg.contains("non-existent node")),
 //         "Should fail at compile time for invalid target"
@@ -2838,12 +2832,18 @@ async fn test_stream_error_path() -> Result<(), LangGraphError> {
 #[tokio::test]
 async fn test_multi_start_nodes_execution() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
-    builder.add_node("entry_a", Box::new(MessageNode {
-        message: "from_a".to_string(),
-    }));
-    builder.add_node("entry_b", Box::new(MessageNode {
-        message: "from_b".to_string(),
-    }));
+    builder.add_node(
+        "entry_a",
+        Box::new(MessageNode {
+            message: "from_a".to_string(),
+        }),
+    );
+    builder.add_node(
+        "entry_b",
+        Box::new(MessageNode {
+            message: "from_b".to_string(),
+        }),
+    );
     builder.add_node("merge", Box::new(CounterNode));
     builder.set_start_node("entry_a");
     builder.add_start_node("entry_b");
@@ -2925,7 +2925,10 @@ async fn test_mixed_edge_types_different_nodes() -> Result<(), LangGraphError> {
     builder.add_node("target", Box::new(CounterNode));
     builder.add_edge("__start__", HashSet::from(["static_node".to_string()]));
     // static_node 使用静态边
-    builder.add_edge("static_node", HashSet::from(["conditional_node".to_string()]));
+    builder.add_edge(
+        "static_node",
+        HashSet::from(["conditional_node".to_string()]),
+    );
     // conditional_node 使用条件边
     builder.add_conditional_edge(
         "conditional_node",
@@ -2957,7 +2960,10 @@ async fn test_is_end_node_with_mixed_keys() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap();
-    assert_eq!(count, 1, "Node should execute even with mixed end_node keys");
+    assert_eq!(
+        count, 1,
+        "Node should execute even with mixed end_node keys"
+    );
 
     Ok(())
 }
@@ -3007,7 +3013,10 @@ async fn test_default_memory_state_default() -> Result<(), LangGraphError> {
     let state = Arc::new(DefaultMemoryState::default());
     state.set("key", "value").await?;
     let result: String = state.get("key").await?.unwrap();
-    assert_eq!(result, "value", "Default state should work identically to new()");
+    assert_eq!(
+        result, "value",
+        "Default state should work identically to new()"
+    );
 
     Ok(())
 }
@@ -3090,7 +3099,10 @@ async fn test_max_steps_one() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 0, "max_steps=1: step_count reaches 1 immediately, node never executes");
+    assert_eq!(
+        count, 0,
+        "max_steps=1: step_count reaches 1 immediately, node never executes"
+    );
 
     Ok(())
 }
@@ -3109,7 +3121,10 @@ async fn test_dead_end_node_no_outgoing_edges() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "dead_end node should execute once, then exit gracefully");
+    assert_eq!(
+        count, 1,
+        "dead_end node should execute once, then exit gracefully"
+    );
 
     Ok(())
 }
@@ -3130,7 +3145,10 @@ async fn test_edge_from_end_node() -> Result<(), LangGraphError> {
 
     // __end__ 被检测到后执行结束，不会继续走 __end__ 的出边
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "node should execute once, end node terminates execution");
+    assert_eq!(
+        count, 1,
+        "node should execute once, end node terminates execution"
+    );
 
     Ok(())
 }
@@ -3166,10 +3184,7 @@ async fn test_edge_source_empty_string() {
     builder.add_edge("node", HashSet::from(["__end__".to_string()]));
 
     let result = builder.compile();
-    assert!(
-        result.is_err(),
-        "Empty edge source should fail validation"
-    );
+    assert!(result.is_err(), "Empty edge source should fail validation");
 }
 
 /// 测试场景：add_conditional_edge 源节点为空字符串
@@ -3308,7 +3323,10 @@ async fn test_static_edge_empty_targets() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "node should execute once, then exit via empty next");
+    assert_eq!(
+        count, 1,
+        "node should execute once, then exit via empty next"
+    );
 
     Ok(())
 }
@@ -3328,7 +3346,10 @@ async fn test_edge_from_end_to_start() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "end node terminates execution before cycling back");
+    assert_eq!(
+        count, 1,
+        "end node terminates execution before cycling back"
+    );
 
     Ok(())
 }
@@ -3348,7 +3369,10 @@ async fn test_end_node_as_registered_node() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 0, "terminate is __start__'s target AND end_node, so it acts as virtual end");
+    assert_eq!(
+        count, 0,
+        "terminate is __start__'s target AND end_node, so it acts as virtual end"
+    );
 
     Ok(())
 }
@@ -3595,7 +3619,10 @@ async fn test_start_directly_to_end() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 0, "orphan never executed: __start__ → __end__ skips all nodes");
+    assert_eq!(
+        count, 0,
+        "orphan never executed: __start__ → __end__ skips all nodes"
+    );
 
     Ok(())
 }
@@ -3616,7 +3643,10 @@ async fn test_start_self_loop() -> Result<(), LangGraphError> {
 
     // __start__ → __start__ 循环5次后达到 max_steps，node 永远不会执行
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 0, "node never executed: start self-loop consumes all steps");
+    assert_eq!(
+        count, 0,
+        "node never executed: start self-loop consumes all steps"
+    );
 
     Ok(())
 }
@@ -3816,7 +3846,10 @@ async fn test_node_fan_out_to_start_and_node() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 4, "node_a and node_b execute in fan-out loop until max_steps");
+    assert_eq!(
+        count, 4,
+        "node_a and node_b execute in fan-out loop until max_steps"
+    );
 
     Ok(())
 }
@@ -3835,7 +3868,9 @@ async fn test_two_nodes_each_with_conditional_edge() -> Result<(), LangGraphErro
     );
     builder.add_conditional_edge(
         "node_b",
-        vec![Box::new(|_state: &DefaultMemoryState| "__end__".to_string())],
+        vec![Box::new(|_state: &DefaultMemoryState| {
+            "__end__".to_string()
+        })],
     );
     builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
     let graph = builder.compile()?;
@@ -3909,7 +3944,10 @@ async fn test_edge_overwrite_same_source() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "Only node_b should execute: second add_edge overwrites first");
+    assert_eq!(
+        count, 1,
+        "Only node_b should execute: second add_edge overwrites first"
+    );
 
     Ok(())
 }
@@ -3939,7 +3977,10 @@ async fn test_conditional_edge_overwrite_same_source() -> Result<(), LangGraphEr
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "Only node_b should execute: second conditional edge overwrites");
+    assert_eq!(
+        count, 1,
+        "Only node_b should execute: second conditional edge overwrites"
+    );
 
     Ok(())
 }
@@ -3986,7 +4027,10 @@ async fn test_conditional_edge_duplicate_targets() -> Result<(), LangGraphError>
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 1, "node should execute once: HashSet deduplicates targets");
+    assert_eq!(
+        count, 1,
+        "node should execute once: HashSet deduplicates targets"
+    );
 
     Ok(())
 }
@@ -4115,7 +4159,10 @@ async fn test_start_to_start_overwrites_normal_edge() -> Result<(), LangGraphErr
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 0, "__start__ → __start__ overwrites the edge to node");
+    assert_eq!(
+        count, 0,
+        "__start__ → __start__ overwrites the edge to node"
+    );
 
     Ok(())
 }

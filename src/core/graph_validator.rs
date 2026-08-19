@@ -106,7 +106,10 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
         Ok(())
     }
 
-    fn validate_start_end_nodes(start_nodes: &HashSet<String>, end_node: &str) -> Result<(), LangGraphError> {
+    fn validate_start_end_nodes(
+        start_nodes: &HashSet<String>,
+        end_node: &str,
+    ) -> Result<(), LangGraphError> {
         if start_nodes.is_empty() {
             return Err(LangGraphError::GraphError(
                 "Start node set cannot be empty".to_string(),
@@ -197,7 +200,10 @@ impl<S: AgentState + Send + Sync> GraphValidator<S> {
                 )));
             }
             for target in targets {
-                if !start_nodes.contains(target) && target != end_node && !nodes.contains_key(target) {
+                if !start_nodes.contains(target)
+                    && target != end_node
+                    && !nodes.contains_key(target)
+                {
                     return Err(LangGraphError::GraphError(format!(
                         "Static edge target '{}' (from '{}') is not a registered node",
                         target, from

@@ -281,7 +281,7 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
         if current.is_empty() {
             break;
         }
-        
+
         let node_names: Vec<String> = current.iter().cloned().collect();
         let nodes = match graph.get_node_by_keys(&current) {
             Ok(n) => n,
@@ -294,7 +294,8 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
                     step: step_count,
                     nodes: node_names.clone(),
                 },
-            ).await?;
+            )
+            .await?;
             if let Err(e) =
                 batch_apply_with_events(&tx, &node_names, nodes, Arc::clone(&state), step_count)
                     .await
@@ -303,9 +304,7 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
             }
         }
 
-        let next = match graph
-            .get_next_node_key(&current, state.as_ref())
-        {
+        let next = match graph.get_next_node_key(&current, state.as_ref()) {
             Ok(n) => n,
             Err(e) => return fail(&tx, &state, step_count, e).await,
         };
@@ -318,7 +317,7 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
                 to_nodes: next.iter().cloned().collect(),
             },
         )
-            .await?;
+        .await?;
 
         current = next;
     }
