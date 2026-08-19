@@ -3203,7 +3203,7 @@ async fn test_infinity_state_storage() {
 
     // 验证 set 操作本身不会 panic（无论 JSON 是否支持 Infinity）
     match pos_inf_result {
-        Ok(()) => {
+        Ok(_) => {
             let val: Option<serde_json::Value> = state.get("pos_inf").await.unwrap();
             assert!(val.is_some(), "pos_inf value should be stored");
         }
@@ -3217,7 +3217,7 @@ async fn test_infinity_state_storage() {
     }
 
     match neg_inf_result {
-        Ok(()) => {
+        Ok(_) => {
             let val: Option<serde_json::Value> = state.get("neg_inf").await.unwrap();
             assert!(val.is_some(), "neg_inf value should be stored");
         }
