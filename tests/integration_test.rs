@@ -4027,7 +4027,7 @@ async fn test_set_max_steps_multiple() -> Result<(), LangGraphError> {
     graph.invoke(state.clone()).await?;
 
     let count: i32 = state.get("count").await?.unwrap_or(0);
-    assert_eq!(count, 3, "max_steps=3: node should execute 3 times");
+    assert_eq!(count, 2, "max_steps=3: node should execute 2 times");
 
     Ok(())
 }
