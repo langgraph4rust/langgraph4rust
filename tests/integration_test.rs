@@ -3070,3 +3070,492 @@ async fn test_conditional_edge_returns_nonexistent_node() -> Result<(), LangGrap
 
     Ok(())
 }
+
+// ============================================================================
+// 第三批补充测试：覆盖剩余未测试路径
+// ============================================================================
+
+/// 测试场景：max_steps=1 精确边界
+/// 验证 max_steps=1 时，起始节点不执行，循环直接退出
+#[tokio::test]
+async fn test_max_steps_one() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.set_max_steps(1);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "max_steps=1: step_count reaches 1 immediately, node never executes");
+
+    Ok(())
+}
+
+/// 测试场景：死胡同节点（无出边，非 end_node）
+/// 验证当节点既没有静态边也没有条件边时，执行静默退出
+#[tokio::test]
+async fn test_dead_end_node_no_outgoing_edges() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("dead_end", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["dead_end".to_string()]));
+    // dead_end 没有出边
+
+    let graph = builder.compile()?;
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "dead_end node should execute once, then exit gracefully");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源节点为 __end__
+/// 验证 __end__ 作为虚拟节点也可以有出边
+#[tokio::test]
+async fn test_edge_from_end_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("__end__", HashSet::from(["node".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // __end__ 被检测到后执行结束，不会继续走 __end__ 的出边
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once, end node terminates execution");
+
+    Ok(())
+}
+
+/// 测试场景：add_conditional_edge 源节点为 __end__
+/// 验证 __end__ 虚拟节点能否有条件边
+#[tokio::test]
+async fn test_conditional_edge_from_end_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.add_conditional_edge(
+        "__end__",
+        vec![Box::new(|_state: &DefaultMemoryState| "node".to_string())],
+    );
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "end node terminates before conditional edge is evaluated");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源节点为空字符串
+/// 验证空字符串边的源会在编译时被验证器捕获
+#[tokio::test]
+async fn test_edge_source_empty_string() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("", HashSet::from(["node".to_string()]));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        result.is_err(),
+        "Empty edge source should fail validation"
+    );
+}
+
+/// 测试场景：add_conditional_edge 源节点为空字符串
+/// 验证空字符串条件边源在编译时被验证器捕获
+#[tokio::test]
+async fn test_conditional_edge_source_empty_string() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_conditional_edge(
+        "",
+        vec![Box::new(|_state: &DefaultMemoryState| "node".to_string())],
+    );
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        result.is_err(),
+        "Empty conditional edge source should fail validation"
+    );
+}
+
+/// 测试场景：f64::INFINITY 状态存储
+/// 验证 JSON 序列化对 Infinity 的处理（JSON 标准不支持 Infinity）
+#[tokio::test]
+async fn test_infinity_state_storage() {
+    let state = Arc::new(DefaultMemoryState::new());
+
+    let pos_inf_result = state.set("pos_inf", f64::INFINITY).await;
+    assert!(
+        pos_inf_result.is_err(),
+        "JSON cannot represent Infinity, should fail serialization"
+    );
+
+    let neg_inf_result = state.set("neg_inf", f64::NEG_INFINITY).await;
+    assert!(
+        neg_inf_result.is_err(),
+        "JSON cannot represent -Infinity, should fail serialization"
+    );
+}
+
+/// 测试场景：并发 invoke 同一个图
+/// 验证同一个 StateGraph 可以并发执行多次（不同状态）
+#[tokio::test]
+async fn test_concurrent_invoke_same_graph() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = Arc::new(builder.compile()?);
+
+    let state1 = Arc::new(DefaultMemoryState::new());
+    let state2 = Arc::new(DefaultMemoryState::new());
+    let state3 = Arc::new(DefaultMemoryState::new());
+
+    let g1 = Arc::clone(&graph);
+    let g2 = Arc::clone(&graph);
+    let g3 = Arc::clone(&graph);
+
+    let task1 = tokio::spawn(async move { g1.invoke(state1).await });
+    let task2 = tokio::spawn(async move { g2.invoke(state2).await });
+    let task3 = tokio::spawn(async move { g3.invoke(state3).await });
+
+    let (r1, r2, r3) = tokio::try_join!(task1, task2, task3).expect("join failed");
+
+    assert!(r1.is_ok(), "concurrent invoke 1 should succeed");
+    assert!(r2.is_ok(), "concurrent invoke 2 should succeed");
+    assert!(r3.is_ok(), "concurrent invoke 3 should succeed");
+
+    Ok(())
+}
+
+/// 测试场景：多个条件 router 返回不同节点
+/// 验证多个 router 的结果会被 union 到一起
+#[tokio::test]
+async fn test_multiple_routers_return_different_nodes() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("target_a", Box::new(CounterNode));
+    builder.add_node("target_b", Box::new(CounterNode));
+    builder.add_node("target_c", Box::new(CounterNode));
+
+    builder.add_conditional_edge(
+        "__start__",
+        vec![
+            Box::new(|_state: &DefaultMemoryState| "target_a".to_string()),
+            Box::new(|_state: &DefaultMemoryState| "target_b".to_string()),
+            Box::new(|_state: &DefaultMemoryState| "target_c".to_string()),
+        ],
+    );
+
+    builder.add_edge("target_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("target_b", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("target_c", HashSet::from(["__end__".to_string()]));
+
+    let graph = builder.compile()?;
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 3, "All three targets should execute in parallel");
+
+    Ok(())
+}
+
+/// 测试场景：静态边目标为空集合
+/// 验证添加空目标集合的静态边后，执行时 current 变空，循环退出
+#[tokio::test]
+async fn test_static_edge_empty_targets() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::new()); // 空目标
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once, then exit via empty next");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源节点为 __end__ 且目标为 __start__
+/// 验证 __end__ -> __start__ 的边会被编译通过但执行时终止
+#[tokio::test]
+async fn test_edge_from_end_to_start() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("__end__", HashSet::from(["__start__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "end node terminates execution before cycling back");
+
+    Ok(())
+}
+
+/// 测试场景：set_end_node 设置为已注册的普通节点
+/// 验证自定义 end_node 可以是已注册的普通节点
+#[tokio::test]
+async fn test_end_node_as_registered_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("terminate", Box::new(CounterNode));
+    builder.set_end_node("terminate");
+    builder.add_edge("__start__", HashSet::from(["terminate".to_string()]));
+    // terminate 不需要再连到 __end__
+
+    let graph = builder.compile()?;
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "terminate is __start__'s target AND end_node, so it acts as virtual end");
+
+    Ok(())
+}
+
+/// 测试场景：条件边同时返回 __end__ 和普通节点
+/// 验证多个 router 返回 end_node 和普通节点的混合场景
+#[tokio::test]
+async fn test_conditional_edge_mixed_with_end() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_conditional_edge(
+        "__start__",
+        vec![
+            Box::new(|_state: &DefaultMemoryState| "__end__".to_string()),
+            Box::new(|_state: &DefaultMemoryState| "node".to_string()),
+        ],
+    );
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // current = {__end__, node} → is_end_node → remove __end__ → {node}
+    // node 执行 → next = {__end__} → is_end_node → 结束
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once alongside __end__");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 和 add_conditional_edge 同时存在于同一节点
+/// 验证静态边和条件边不能共存于同一节点，编译时会被验证器拒绝
+#[tokio::test]
+async fn test_edge_overwrites_conditional_edge() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+
+    builder.add_conditional_edge(
+        "__start__",
+        vec![Box::new(|_state: &DefaultMemoryState| "node_a".to_string())],
+    );
+    builder.add_edge("__start__", HashSet::from(["node_b".to_string()]));
+
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("cannot have both")),
+        "Static and conditional edges on same node should fail compilation"
+    );
+}
+
+/// 测试场景：add_conditional_edge 和 add_edge 同时存在于同一节点
+/// 验证先添加静态边再添加条件边，编译时同样被验证器拒绝
+#[tokio::test]
+async fn test_conditional_edge_overwrites_edge() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_conditional_edge(
+        "__start__",
+        vec![Box::new(|_state: &DefaultMemoryState| "node_b".to_string())],
+    );
+
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("cannot have both")),
+        "Static and conditional edges on same node should fail compilation"
+    );
+}
+
+/// 测试场景：set_start_node 设置为 __end__
+/// 验证起始节点直接设为结束节点的行为
+#[tokio::test]
+async fn test_start_node_is_end_node() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.set_start_node("__end__");
+    builder.set_end_node("__end__");
+    builder.add_edge("__end__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    // start 和 end 相同时 validate_start_end_different 会报错
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("cannot be the same")),
+        "Start and end node cannot be the same"
+    );
+}
+
+/// 测试场景：add_edge 目标包含 __end__ 和普通节点
+/// 验证 is_end_node 检测到 __end__ 后移除它，剩余节点继续执行
+#[tokio::test]
+async fn test_edge_targets_include_end_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge(
+        "node",
+        HashSet::from(["__end__".to_string(), "node".to_string()]),
+    );
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.set_max_steps(5);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert!(count >= 1, "node should execute at least once");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源为 __end__ 且目标也包含 __end__
+/// 验证 __end__ -> __end__ 的边是否正常编译
+#[tokio::test]
+async fn test_edge_from_end_to_end() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("__end__", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once");
+
+    Ok(())
+}
+
+/// 测试场景：多起始节点全部无出边
+/// 验证所有 start_nodes 都没有出边时编译报错
+#[tokio::test]
+async fn test_all_start_nodes_without_edges() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node1", Box::new(CounterNode));
+    builder.add_node("node2", Box::new(CounterNode));
+    builder.set_start_node("node1");
+    builder.add_start_node("node2");
+    // 两个 start_nodes 都没有出边
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("must have at least one outgoing edge")),
+        "All start nodes without edges should fail"
+    );
+}
+
+/// 测试场景：add_start_node 添加空字符串起始节点
+/// 验证 add_start_node("") 后编译报错
+#[tokio::test]
+async fn test_add_start_node_empty_string() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_start_node("");
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("Start node cannot be empty")),
+        "Empty start node should fail validation"
+    );
+}
+
+/// 测试场景：invoke 后状态被修改但图不变
+/// 验证多次 invoke 同一状态，状态累积正确
+#[tokio::test]
+async fn test_state_accumulation_across_invocations() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+    let count1: i32 = state.get("count").await?.unwrap();
+    assert_eq!(count1, 1);
+
+    graph.invoke(state.clone()).await?;
+    let count2: i32 = state.get("count").await?.unwrap();
+    assert_eq!(count2, 2);
+
+    graph.invoke(state.clone()).await?;
+    let count3: i32 = state.get("count").await?.unwrap();
+    assert_eq!(count3, 3);
+
+    Ok(())
+}
+
+/// 测试场景：条件边 router 返回 end_node 和普通节点同时存在
+/// 验证 is_end_node 检测到后移除 end_node，剩余节点继续执行
+#[tokio::test]
+async fn test_conditional_edge_returns_end_and_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("extra", Box::new(CounterNode));
+    builder.add_conditional_edge(
+        "__start__",
+        vec![
+            Box::new(|_state: &DefaultMemoryState| "__end__".to_string()),
+            Box::new(|_state: &DefaultMemoryState| "extra".to_string()),
+        ],
+    );
+    builder.add_edge("extra", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // current = {__end__, extra} → is_end_node → remove __end__ → {extra}
+    // extra 执行 → next = {__end__} → is_end_node → 结束
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "extra node should execute");
+
+    Ok(())
+}
