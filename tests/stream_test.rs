@@ -1384,8 +1384,8 @@ async fn test_conditional_router_unknown_target_errors() -> Result<(), LangGraph
     match events.last() {
         Some(StreamEvent::WorkflowError { error, .. }) => {
             assert!(
-                matches!(error, LangGraphError::NotFound(_)),
-                "unknown router target should yield NotFound"
+                matches!(error, LangGraphError::GraphError(_)),
+                "unknown router target should yield GraphError"
             );
         }
         _ => panic!("expected WorkflowError for unknown router target"),

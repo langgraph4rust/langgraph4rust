@@ -283,19 +283,18 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
         }
         
         let node_names: Vec<String> = current.iter().cloned().collect();
-        emit(
-            &tx,
-            StreamEvent::StepStarted {
-                step: step_count,
-                nodes: node_names,
-            },
-        ).await?;
         let nodes = match graph.get_node_by_keys(&current) {
             Ok(n) => n,
             Err(e) => return fail(&tx, &state, step_count, e).await,
         };
         if !nodes.is_empty() {
-            let node_names: Vec<String> = current.iter().cloned().collect();
+            emit(
+                &tx,
+                StreamEvent::StepStarted {
+                    step: step_count,
+                    nodes: node_names.clone(),
+                },
+            ).await?;
             if let Err(e) =
                 batch_apply_with_events(&tx, &node_names, nodes, Arc::clone(&state), step_count)
                     .await
