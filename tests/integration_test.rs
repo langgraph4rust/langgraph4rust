@@ -3576,3 +3576,546 @@ async fn test_conditional_edge_returns_end_and_node() -> Result<(), LangGraphErr
 
     Ok(())
 }
+
+// ============================================================================
+// 第四批补充测试：深度覆盖剩余路径
+// ============================================================================
+
+/// 测试场景：__start__ 直接连接到 __end__（空图）
+/// 验证没有任何注册节点执行，直接完成
+#[tokio::test]
+async fn test_start_directly_to_end() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("orphan", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("orphan", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "orphan never executed: __start__ → __end__ skips all nodes");
+
+    Ok(())
+}
+
+/// 测试场景：__start__ → __start__ 自环
+/// 验证起始节点自环导致无限循环，max_steps 触发退出
+#[tokio::test]
+async fn test_start_self_loop() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["__start__".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.set_max_steps(5);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // __start__ → __start__ 循环5次后达到 max_steps，node 永远不会执行
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "node never executed: start self-loop consumes all steps");
+
+    Ok(())
+}
+
+/// 测试场景：普通节点 → __start__（回到起点）
+/// 验证通过 __start__ 回到起点形成循环，max_steps 触发退出
+#[tokio::test]
+async fn test_node_cycles_back_to_start() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__start__".to_string()]));
+    builder.set_max_steps(3);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // step1: __start__ → node, node执行 → count=1 → next=__start__
+    // step2: __start__ → node, node执行 → count=2 → next=__start__
+    // step3: __start__ → node, node执行 → count=3 → next=__start__ → max_steps=3 → exit
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 3, "node should execute 3 times before max_steps");
+
+    Ok(())
+}
+
+/// 测试场景：普通节点自环
+/// 验证节点静态边指向自身，max_steps 触发退出
+#[tokio::test]
+async fn test_node_self_loop() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["node".to_string()]));
+    builder.set_max_steps(3);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 3, "node should execute 3 times via self-loop");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源为 __end__ 且目标为未注册节点
+/// 验证 __end__ 出边到未注册节点时编译失败
+#[tokio::test]
+async fn test_edge_from_end_to_unregistered_node() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("__end__", HashSet::from(["ghost".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("not a registered node")),
+        "Edge from __end__ to unregistered node should fail"
+    );
+}
+
+/// 测试场景：add_conditional_edge 空路由器列表
+/// 验证空路由器列表可以正常编译，next 为空导致循环退出
+#[tokio::test]
+async fn test_conditional_edge_empty_router_list() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_conditional_edge("__start__", vec![]);
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "empty router list produces no next nodes");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源为 __start__ 且目标为未注册节点
+/// 验证起始边到未注册节点编译失败
+#[tokio::test]
+async fn test_edge_from_start_to_unregistered_node() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["ghost".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("not a registered node")),
+        "Edge from __start__ to unregistered node should fail"
+    );
+}
+
+/// 测试场景：add_edge 源为已注册节点但目标为未注册节点
+/// 验证普通节点出边到未注册节点编译失败
+#[tokio::test]
+async fn test_edge_from_node_to_unregistered_node() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["ghost".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("not a registered node")),
+        "Edge from node to unregistered target should fail"
+    );
+}
+
+/// 测试场景：add_edge 源为未注册节点
+/// 验证未注册节点作为边的源编译失败
+#[tokio::test]
+async fn test_edge_from_unregistered_source() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("ghost", HashSet::from(["node".to_string()]));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("not a registered node")),
+        "Edge from unregistered source should fail"
+    );
+}
+
+/// 测试场景：add_conditional_edge 源为未注册的普通节点
+/// 验证条件边从未注册节点出发时编译失败
+#[tokio::test]
+async fn test_conditional_edge_from_unregistered_source() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_conditional_edge(
+        "ghost",
+        vec![Box::new(|_state: &DefaultMemoryState| "node".to_string())],
+    );
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("not a registered node")),
+        "Conditional edge from unregistered source should fail"
+    );
+}
+
+/// 测试场景：add_edge 源为 __start__ 且目标同时包含 __end__ 和普通节点
+/// 验证 fan-out 从 __start__ 开始，包含 end_node
+#[tokio::test]
+async fn test_start_fan_out_to_end_and_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge(
+        "__start__",
+        HashSet::from(["__end__".to_string(), "node".to_string()]),
+    );
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // current = {__end__, node} → is_end_node → remove __end__ → {node}
+    // node 执行 → next = {__end__} → is_end_node → 结束
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 目标同时包含 __start__ 和普通节点
+/// 验证回退到 __start__ 的循环行为
+#[tokio::test]
+async fn test_node_fan_out_to_start_and_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge(
+        "node_a",
+        HashSet::from(["__start__".to_string(), "node_b".to_string()]),
+    );
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    builder.set_max_steps(5);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // step1: node_a(1) → next={__start__, node_b} → current={__start__, node_b}
+    // step2: __start__ skip, node_b(1) → next={__end__} → current={__end__} → end
+    // step3: __end__ → remove → empty → break
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 2, "node_a and node_b should each execute once");
+
+    Ok(())
+}
+
+/// 测试场景：两个不同节点各有一条条件边
+/// 验证不同节点可以有各自的条件边（不冲突）
+#[tokio::test]
+async fn test_two_nodes_each_with_conditional_edge() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+
+    builder.add_conditional_edge(
+        "node_a",
+        vec![Box::new(|_state: &DefaultMemoryState| "node_b".to_string())],
+    );
+    builder.add_conditional_edge(
+        "node_b",
+        vec![Box::new(|_state: &DefaultMemoryState| "__end__".to_string())],
+    );
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 2, "both nodes should execute via conditional edges");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源为 __start__ 且目标为空集合
+/// 验证起始边空目标时，next 为空，循环退出
+#[tokio::test]
+async fn test_start_edge_empty_targets() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::new());
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "node never executed: start has no targets");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 目标为空集合但又有条件边
+/// 验证空静态边 + 条件边共存会在编译时被 no_mixed_edge_types 拒绝
+#[tokio::test]
+async fn test_empty_static_edge_with_conditional_edge() {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::new());
+    builder.add_conditional_edge(
+        "__start__",
+        vec![Box::new(|_state: &DefaultMemoryState| "node_a".to_string())],
+    );
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+
+    let result = builder.compile();
+    assert!(
+        matches!(result, Err(LangGraphError::GraphError(msg)) if msg.contains("cannot have both")),
+        "Empty static edge + conditional edge on same node should fail"
+    );
+}
+
+/// 测试场景：add_edge 覆盖同一源节点的旧边
+/// 验证同一源节点多次调用 add_edge，后者覆盖前者
+#[tokio::test]
+async fn test_edge_overwrite_same_source() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("__start__", HashSet::from(["node_b".to_string()]));
+
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "Only node_b should execute: second add_edge overwrites first");
+
+    Ok(())
+}
+
+/// 测试场景：add_conditional_edge 覆盖同一源节点的旧条件边
+/// 验证同一源节点多次调用 add_conditional_edge，后者覆盖前者
+#[tokio::test]
+async fn test_conditional_edge_overwrite_same_source() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+
+    builder.add_conditional_edge(
+        "__start__",
+        vec![Box::new(|_state: &DefaultMemoryState| "node_a".to_string())],
+    );
+    builder.add_conditional_edge(
+        "__start__",
+        vec![Box::new(|_state: &DefaultMemoryState| "node_b".to_string())],
+    );
+
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "Only node_b should execute: second conditional edge overwrites");
+
+    Ok(())
+}
+
+/// 测试场景：add_start_node 多次添加同一起始节点
+/// 验证 HashSet 去重，重复添加不影响
+#[tokio::test]
+async fn test_add_start_node_duplicate() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_start_node("custom_start");
+    builder.add_start_node("custom_start"); // 重复
+    builder.add_edge("custom_start", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once");
+
+    Ok(())
+}
+
+/// 测试场景：条件边 router 返回多个不同节点 + 重复节点
+/// 验证多个 router 返回相同节点会被 HashSet 去重
+#[tokio::test]
+async fn test_conditional_edge_duplicate_targets() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_conditional_edge(
+        "__start__",
+        vec![
+            Box::new(|_state: &DefaultMemoryState| "node".to_string()),
+            Box::new(|_state: &DefaultMemoryState| "node".to_string()),
+            Box::new(|_state: &DefaultMemoryState| "node".to_string()),
+        ],
+    );
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once: HashSet deduplicates targets");
+
+    Ok(())
+}
+
+/// 测试场景：add_node 覆盖同名节点
+/// 验证注册同名节点时后者覆盖前者
+#[tokio::test]
+async fn test_add_node_overwrite() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode)); // 第一个
+    builder.add_node("node", Box::new(CounterNode)); // 覆盖
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once");
+
+    Ok(())
+}
+
+/// 测试场景：set_max_steps 多次设置
+/// 验证最后一次设置的值生效
+#[tokio::test]
+async fn test_set_max_steps_multiple() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["node".to_string()]));
+    builder.set_max_steps(100);
+    builder.set_max_steps(3); // 最后覆盖
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 3, "max_steps=3: node should execute 3 times");
+
+    Ok(())
+}
+
+/// 测试场景：set_max_steps 设置为 usize::MAX
+/// 验证有效禁用 max_steps 限制（默认值）
+#[tokio::test]
+async fn test_set_max_steps_to_max() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.set_max_steps(usize::MAX);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node should execute once");
+
+    Ok(())
+}
+
+/// 测试场景：set_end_node 多次设置
+/// 验证最后一次设置生效
+#[tokio::test]
+async fn test_set_end_node_multiple() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+    builder.set_end_node("node_a");
+    builder.set_end_node("node_b"); // 覆盖
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["node_b".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // node_a(1) → next={node_b} → node_b is end_node → remove → empty → break
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "only node_a executes: node_b is end_node");
+
+    Ok(())
+}
+
+/// 测试场景：set_start_node 多次设置
+/// 验证最后一次设置生效
+#[tokio::test]
+async fn test_set_start_node_multiple() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+    builder.set_start_node("node_a");
+    builder.set_start_node("node_b"); // 覆盖
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    // set_start_node 重置了 start_nodes，所以只有 node_b 是 start_node
+    assert_eq!(count, 1, "only node_b should execute as start node");
+
+    Ok(())
+}
+
+/// 测试场景：add_edge 源为 __start__ 且目标为 __start__
+/// 验证 __start__ → __start__ 也覆盖到默认的 __start__ 边（实际上与 test_start_self_loop 互补）
+/// 这里验证：在已有正常边的情况下，__start__ → __start__ 覆盖旧边后形成纯自环
+#[tokio::test]
+async fn test_start_to_start_overwrites_normal_edge() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node".to_string()]));
+    builder.add_edge("__start__", HashSet::from(["__start__".to_string()]));
+    builder.add_edge("node", HashSet::from(["__end__".to_string()]));
+    builder.set_max_steps(3);
+    let graph = builder.compile()?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "__start__ → __start__ overwrites the edge to node");
+
+    Ok(())
+}
