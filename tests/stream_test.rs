@@ -1103,8 +1103,12 @@ impl AgentState for SyncRouteState {
         Ok(true)
     }
 
-    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
-        todo!()
+    async fn snapshot(
+        &self,
+        step: usize,
+        node_keys: Vec<String>,
+    ) -> Result<(), ()>{
+        Ok(())
     }
 }
 
@@ -2224,8 +2228,12 @@ impl AgentState for DebugState {
         Ok(true)
     }
 
-    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
-        todo!()
+    async fn snapshot(
+        &self,
+        step: usize,
+        node_keys: Vec<String>,
+    ) -> Result<(), ()>{
+        Ok(())
     }
 }
 
@@ -2355,8 +2363,12 @@ impl AgentState for CounterState {
         Ok(true)
     }
 
-    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
-        todo!()
+    async fn snapshot(
+        &self,
+        step: usize,
+        node_keys: Vec<String>,
+    ) -> Result<(), ()>{
+        Ok(())
     }
 }
 

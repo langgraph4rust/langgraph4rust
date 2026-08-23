@@ -226,11 +226,11 @@ pub trait AgentState {
     /// Returns [`LangGraphError::StateError`] when:
     /// - The value cannot be serialized to JSON
     /// - An internal storage or persistence error occurs
-    async fn snapshot<T: Serialize + Send + Sync>(
+    async fn snapshot(
         &self,
-        key: &str,
-        value: T,
-    ) -> Result<(), LangGraphError>;
+        step: usize,
+        node_keys: Vec<String>,
+    ) -> Result<(), ()>;
 }
 
 /// Default in-memory implementation of [`AgentState`] using JSON storage.
@@ -359,7 +359,11 @@ impl AgentState for DefaultMemoryState {
         Ok(true)
     }
 
-    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+    async fn snapshot(
+        &self,
+        step: usize,
+        node_keys: Vec<String>,
+    ) -> Result<(), ()>{
         Ok(())
     }
 }

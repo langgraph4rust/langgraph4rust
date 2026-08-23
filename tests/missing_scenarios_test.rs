@@ -67,8 +67,12 @@ impl AgentState for LoggingState {
         Ok(true)
     }
 
-    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
-        todo!()
+    async fn snapshot(
+        &self,
+        step: usize,
+        node_keys: Vec<String>,
+    ) -> Result<(), ()>{
+        Ok(())
     }
 }
 

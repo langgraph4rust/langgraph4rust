@@ -85,8 +85,12 @@ impl AgentState for AuditedState {
         Ok(true)
     }
 
-    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
-        todo!()
+    async fn snapshot(
+        &self,
+        _: usize,
+        _: Vec<String>,
+    ) -> Result<(), ()>{
+        Ok(())
     }
 }
 
