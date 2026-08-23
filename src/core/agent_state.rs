@@ -192,6 +192,40 @@ pub trait AgentState {
     ) -> Result<bool, LangGraphError>;
 
 
+    /// Save a snapshot of a value under the given key.
+    ///
+    /// Provides a hook for state backends to persist checkpoints at critical
+    /// points during workflow execution. The default implementation is a no-op;
+    /// custom backends can override this to write the state to a database, file
+    /// system, or other durable storage.
+    ///
+    /// Unlike [`set`](AgentState::set), `snapshot` does not modify the runtime
+    /// state — it is intended solely for checkpointing purposes. The workflow
+    /// engine may call this method automatically after each node execution to
+    /// create recovery points.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: The type of value to snapshot. Must implement:
+    ///   - `Serialize`: Can be serialized to JSON
+    ///   - `Send`: Safe to transfer between threads
+    ///   - `Sync`: Safe to share between threads
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The string key identifying the value in the state
+    /// * `value` - The value to snapshot (will be serialized to JSON)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` on successful snapshot
+    /// - `Err(LangGraphError)` if serialization or persistence fails
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LangGraphError::StateError`] when:
+    /// - The value cannot be serialized to JSON
+    /// - An internal storage or persistence error occurs
     async fn snapshot<T: Serialize + Send + Sync>(
         &self,
         key: &str,
