@@ -78,6 +78,10 @@ use tokio::sync::RwLock;
 ///         data.insert(key.to_string(), json);
 ///         Ok(true)
 ///     }
+///
+///     async fn snapshot(&self, _step: usize, _node_keys: Vec<String>) -> Result<(), ()> {
+///         Ok(())
+///     }
 /// }
 /// ```
 #[async_trait::async_trait]
