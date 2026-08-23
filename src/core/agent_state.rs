@@ -345,7 +345,7 @@ impl AgentState for DefaultMemoryState {
         Ok(true)
     }
 
-    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()> {
+    async fn snapshot(&self, _step: usize, _node_keys: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }
