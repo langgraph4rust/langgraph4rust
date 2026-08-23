@@ -1,6 +1,6 @@
 [package]
 name = "langgraph4rust"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.85"
 authors = ["langgraph4rust <429608827@qq.com>"]
