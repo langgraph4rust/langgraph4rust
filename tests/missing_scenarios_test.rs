@@ -4,7 +4,7 @@ use langgraph4rust::{
 };
 use std::collections::HashSet;
 use std::sync::Arc;
-
+use serde::Serialize;
 // ============================================================================
 // 场景1: 自定义 AgentState 实现 - 验证 trait 可扩展性
 // ============================================================================
@@ -65,6 +65,10 @@ impl AgentState for LoggingState {
         let mut data = self.data.write().await;
         data.insert(key.to_string(), json_value);
         Ok(true)
+    }
+
+    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+        todo!()
     }
 }
 

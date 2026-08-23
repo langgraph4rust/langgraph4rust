@@ -10,7 +10,7 @@ use langgraph4rust::{
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-
+use serde::Serialize;
 // ─── 测试节点 ────────────────────────────────────────────────────────────────
 
 /// 计数节点：每次执行将 state["count"] 加 1
@@ -1101,6 +1101,10 @@ impl AgentState for SyncRouteState {
             serde_json::to_value(value).map_err(|e| LangGraphError::StateError(e.to_string()))?;
         self.data.lock().unwrap().insert(key.to_string(), v);
         Ok(true)
+    }
+
+    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+        todo!()
     }
 }
 
@@ -2219,6 +2223,10 @@ impl AgentState for DebugState {
     ) -> Result<bool, LangGraphError> {
         Ok(true)
     }
+
+    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+        todo!()
+    }
 }
 
 /// 验证所有 StreamEvent 变体的 Debug 输出都包含有意义的信息
@@ -2345,6 +2353,10 @@ impl AgentState for CounterState {
             serde_json::to_value(value).map_err(|e| LangGraphError::StateError(e.to_string()))?;
         self.data.lock().unwrap().insert(key.to_string(), v);
         Ok(true)
+    }
+
+    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+        todo!()
     }
 }
 

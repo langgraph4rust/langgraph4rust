@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use langgraph4rust::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-
+use serde::Serialize;
 // ============================================================================
 // Custom State Implementation with Audit Logging
 // ============================================================================
@@ -83,6 +83,10 @@ impl AgentState for AuditedState {
         let mut data = self.data.write().await;
         data.insert(key.to_string(), json_value);
         Ok(true)
+    }
+
+    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+        todo!()
     }
 }
 

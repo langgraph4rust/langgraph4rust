@@ -190,6 +190,13 @@ pub trait AgentState {
         key: &str,
         value: T,
     ) -> Result<bool, LangGraphError>;
+
+
+    async fn snapshot<T: Serialize + Send + Sync>(
+        &self,
+        key: &str,
+        value: T,
+    ) -> Result<(), LangGraphError>;
 }
 
 /// Default in-memory implementation of [`AgentState`] using JSON storage.
@@ -316,5 +323,9 @@ impl AgentState for DefaultMemoryState {
         let mut memory = self.memory.write().await;
         memory.insert(key.to_string(), json_value);
         Ok(true)
+    }
+
+    async fn snapshot<T: Serialize + Send + Sync>(&self, key: &str, value: T) -> Result<(), LangGraphError> {
+        Ok(())
     }
 }
