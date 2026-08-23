@@ -7,10 +7,10 @@ use langgraph4rust::{
     AgentNode, AgentState, DefaultMemoryState, END_NODE, LangGraphError, START_NODE,
     StateGraphBuilder, StreamEvent, StreamExt,
 };
+use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use serde::Serialize;
 // ─── 测试节点 ────────────────────────────────────────────────────────────────
 
 /// 计数节点：每次执行将 state["count"] 加 1
@@ -1103,11 +1103,7 @@ impl AgentState for SyncRouteState {
         Ok(true)
     }
 
-    async fn snapshot(
-        &self,
-        step: usize,
-        node_keys: Vec<String>,
-    ) -> Result<(), ()>{
+    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }
@@ -2228,11 +2224,7 @@ impl AgentState for DebugState {
         Ok(true)
     }
 
-    async fn snapshot(
-        &self,
-        step: usize,
-        node_keys: Vec<String>,
-    ) -> Result<(), ()>{
+    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }
@@ -2363,11 +2355,7 @@ impl AgentState for CounterState {
         Ok(true)
     }
 
-    async fn snapshot(
-        &self,
-        step: usize,
-        node_keys: Vec<String>,
-    ) -> Result<(), ()>{
+    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }

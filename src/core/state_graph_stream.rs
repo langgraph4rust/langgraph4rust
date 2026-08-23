@@ -296,7 +296,7 @@ async fn run_driver<S: AgentState + Send + Sync + 'static>(
                 },
             )
             .await?;
-            let _=state.snapshot(step_count, node_names.clone()).await?;
+            let _ = state.snapshot(step_count, node_names.clone()).await?;
             if let Err(e) =
                 batch_apply_with_events(&tx, &node_names, nodes, Arc::clone(&state), step_count)
                     .await

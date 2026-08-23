@@ -195,7 +195,6 @@ pub trait AgentState {
         value: T,
     ) -> Result<bool, LangGraphError>;
 
-
     /// Save a snapshot of the current state at the given execution step.
     ///
     /// Provides a hook for state backends to persist checkpoints at critical
@@ -217,11 +216,7 @@ pub trait AgentState {
     ///
     /// - `Ok(())` on successful snapshot
     /// - `Err(())` if the snapshot operation fails
-    async fn snapshot(
-        &self,
-        step: usize,
-        node_keys: Vec<String>,
-    ) -> Result<(), ()>;
+    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()>;
 }
 
 /// Default in-memory implementation of [`AgentState`] using JSON storage.
@@ -350,11 +345,7 @@ impl AgentState for DefaultMemoryState {
         Ok(true)
     }
 
-    async fn snapshot(
-        &self,
-        step: usize,
-        node_keys: Vec<String>,
-    ) -> Result<(), ()>{
+    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }

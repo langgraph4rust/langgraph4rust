@@ -4,7 +4,6 @@ use langgraph4rust::{
 };
 use std::collections::HashSet;
 use std::sync::Arc;
-use serde::Serialize;
 // ============================================================================
 // 场景1: 自定义 AgentState 实现 - 验证 trait 可扩展性
 // ============================================================================
@@ -67,11 +66,7 @@ impl AgentState for LoggingState {
         Ok(true)
     }
 
-    async fn snapshot(
-        &self,
-        step: usize,
-        node_keys: Vec<String>,
-    ) -> Result<(), ()>{
+    async fn snapshot(&self, step: usize, node_keys: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }

@@ -13,7 +13,6 @@ use async_trait::async_trait;
 use langgraph4rust::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use serde::Serialize;
 // ============================================================================
 // Custom State Implementation with Audit Logging
 // ============================================================================
@@ -85,11 +84,7 @@ impl AgentState for AuditedState {
         Ok(true)
     }
 
-    async fn snapshot(
-        &self,
-        _: usize,
-        _: Vec<String>,
-    ) -> Result<(), ()>{
+    async fn snapshot(&self, _: usize, _: Vec<String>) -> Result<(), ()> {
         Ok(())
     }
 }
