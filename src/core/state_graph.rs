@@ -379,6 +379,67 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
         self.nodes.get(key).map(|node| node.as_ref())
     }
 
+    /// Replace the start node set with a single node.
+    ///
+    /// Clears all existing start nodes and sets the entry point to the
+    /// given node name. This allows reconfiguring the graph's entry point
+    /// after compilation, which is useful for replay, branching, or
+    /// testing scenarios where you want to start execution from a
+    /// different node without rebuilding the entire graph.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The name of the node to set as the sole start node
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` - The start node was replaced successfully
+    ///
+    /// # Note
+    ///
+    /// This method replaces **all** existing start nodes with a single
+    /// node. If you need to add a start node without clearing existing
+    /// ones, use [`StateGraphBuilder::add_start_node`] before compilation.
+    /// The node name is not validated here — calling `invoke` with a
+    /// non-existent start node will result in a runtime error.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use langgraph4rust::*;
+    /// use std::collections::HashSet;
+    /// use std::sync::Arc;
+    ///
+    /// #[derive(Clone)]
+    /// struct MyNode;
+    ///
+    /// #[async_trait]
+    /// impl AgentNode<DefaultMemoryState> for MyNode {
+    ///     async fn apply(&self, _state: Arc<DefaultMemoryState>) -> Result<(), LangGraphError> {
+    ///         Ok(())
+    ///     }
+    /// }
+    ///
+    /// # fn main() -> Result<(), LangGraphError> {
+    /// let mut builder = StateGraphBuilder::<DefaultMemoryState>::new();
+    /// builder.add_node("node_a", Box::new(MyNode));
+    /// builder.add_node("node_b", Box::new(MyNode));
+    /// builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    /// builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    /// builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    /// let mut graph = builder.compile()?;
+    ///
+    /// // Reconfigure to start from node_b instead of node_a
+    /// graph.set_start_nodes(&"node_b".to_string())?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_start_nodes(&mut self, key: &String) -> Result<(), LangGraphError> {
+        self.start_nodes.clear();
+        self.start_nodes.insert(key.clone());
+        Ok(())
+    }
+
     /// Retrieve multiple node references by their names.
     ///
     /// Silently skips keys that are not registered nodes (e.g. virtual start markers).

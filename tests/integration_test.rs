@@ -4166,3 +4166,157 @@ async fn test_start_to_start_overwrites_normal_edge() -> Result<(), LangGraphErr
 
     Ok(())
 }
+
+// ============================================================================
+// set_start_nodes 测试（StateGraph 上的方法）
+// ============================================================================
+
+/// 测试场景：set_start_nodes 替换默认起始节点
+/// 验证编译后调用 set_start_nodes 可以重新指定起始节点
+#[tokio::test]
+async fn test_set_start_nodes_replaces_default() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+
+    // node_a: 写入消息 "node_a"，node_b: 写入消息 "node_b"
+    builder.add_node(
+        "node_a",
+        Box::new(MessageNode {
+            message: "node_a".to_string(),
+        }),
+    );
+    builder.add_node(
+        "node_b",
+        Box::new(MessageNode {
+            message: "node_b".to_string(),
+        }),
+    );
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    let mut graph = builder.compile()?;
+
+    // 默认从 node_a 开始
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+    let msg: Option<String> = state.get("message").await?;
+    assert_eq!(msg, Some("node_a".to_string()), "should default to node_a");
+
+    // 替换为从 node_b 开始
+    graph.set_start_nodes(&"node_b".to_string())?;
+
+    let state2 = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state2.clone()).await?;
+    let msg2: Option<String> = state2.get("message").await?;
+    assert_eq!(
+        msg2,
+        Some("node_b".to_string()),
+        "should execute node_b after set_start_nodes"
+    );
+
+    Ok(())
+}
+
+/// 测试场景：多次调用 set_start_nodes，只有最后一次生效
+/// 验证 set_start_nodes 清空旧节点，只保留最新设置的节点
+#[tokio::test]
+async fn test_set_start_nodes_last_call_wins() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node(
+        "node_a",
+        Box::new(MessageNode {
+            message: "node_a".to_string(),
+        }),
+    );
+    builder.add_node(
+        "node_b",
+        Box::new(MessageNode {
+            message: "node_b".to_string(),
+        }),
+    );
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    let mut graph = builder.compile()?;
+
+    // 多次调用，最后一次应该生效
+    graph.set_start_nodes(&"node_a".to_string())?;
+    graph.set_start_nodes(&"node_b".to_string())?;
+    graph.set_start_nodes(&"node_a".to_string())?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+    let msg: Option<String> = state.get("message").await?;
+    assert_eq!(
+        msg,
+        Some("node_a".to_string()),
+        "last call should determine the start node"
+    );
+
+    Ok(())
+}
+
+/// 测试场景：set_start_nodes 设置为不存在的节点
+/// 验证设置不存在的起始节点后，invoke 静默完成（get_node_by_keys 会跳过未知节点）
+#[tokio::test]
+async fn test_set_start_nodes_nonexistent_node() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node(
+        "node_a",
+        Box::new(MessageNode {
+            message: "node_a".to_string(),
+        }),
+    );
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    let mut graph = builder.compile()?;
+
+    // 设置为不存在的节点
+    graph.set_start_nodes(&"nonexistent".to_string())?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    // invoke 不会报错：get_node_by_keys 跳过未知节点，当前节点集为空，循环退出
+    let result = graph.invoke(state).await;
+    assert!(
+        result.is_ok(),
+        "invoke with nonexistent start node should complete silently"
+    );
+
+    Ok(())
+}
+
+/// 测试场景：set_start_nodes 不影响图的其他结构
+/// 验证修改起始节点后，图的边和节点仍然正常工作
+#[tokio::test]
+async fn test_set_start_nodes_preserves_graph_structure() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node(
+        "node_a",
+        Box::new(MessageNode {
+            message: "node_a".to_string(),
+        }),
+    );
+    builder.add_node("node_b", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["node_b".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    let mut graph = builder.compile()?;
+
+    // 修改起始节点为 node_b，跳过 node_a
+    graph.set_start_nodes(&"node_b".to_string())?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // node_b (CounterNode) 被执行了
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 1, "node_b should be executed once");
+
+    // node_a 没有被执行（message 没有被设置）
+    let msg: Option<String> = state.get("message").await?;
+    assert_eq!(
+        msg, None,
+        "node_a should not be executed when start is node_b"
+    );
+
+    Ok(())
+}
