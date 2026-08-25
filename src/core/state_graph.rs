@@ -406,7 +406,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// existing ones, use [`StateGraphBuilder::add_start_node`] before
     /// compilation. The node names are not validated here — unknown
     /// nodes are silently skipped during execution (see
-    /// [`get_node_by_keys`]).
+    /// `get_node_by_keys`).
     ///
     /// # Example
     ///
