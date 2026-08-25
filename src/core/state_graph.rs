@@ -133,7 +133,7 @@ pub struct StateGraph<S: AgentState + Send + Sync> {
 impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// Create a new compiled StateGraph instance.
     ///
-    /// This is an internal constructor used by [`StateGraphBuilder::compile()`].
+    /// This is an internal constructor used by [`StateGraphBuilder::compile()`](crate::StateGraphBuilder::compile).
     /// Users should not call this directly; always build graphs through the builder.
     ///
     /// # Arguments
@@ -147,7 +147,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     ///
     /// # Safety
     ///
-    /// All parameters are assumed to be validated by [`GraphValidator`].
+    /// All parameters are assumed to be validated by [`GraphValidator`](crate::core::graph_validator::GraphValidator).
     /// Passing unvalidated data may cause panics or undefined behavior.
     pub(crate) fn new(
         max_steps: usize,
@@ -403,7 +403,7 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     ///
     /// This method replaces **all** existing start nodes with the given
     /// collection. If you need to add a start node without clearing
-    /// existing ones, use [`StateGraphBuilder::add_start_node`] before
+    /// existing ones, use [`StateGraphBuilder::add_start_node`](crate::StateGraphBuilder::add_start_node) before
     /// compilation. The node names are not validated here — unknown
     /// nodes are silently skipped during execution (see
     /// `get_node_by_keys`).
