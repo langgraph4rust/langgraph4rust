@@ -387,22 +387,26 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// testing scenarios where you want to start execution from different
     /// nodes without rebuilding the entire graph.
     ///
+    /// Supports setting multiple start nodes for parallel initial execution.
+    ///
     /// # Arguments
     ///
-    /// * `keys` - The names of the nodes to set as the start nodes
+    /// * `keys` - The names of the nodes to set as the start nodes.
+    ///   An empty `Vec` is allowed — subsequent `invoke` will exit
+    ///   immediately with no nodes executed.
     ///
     /// # Returns
     ///
-    /// - `Ok(())` - The start nodes were replaced successfully
+    /// - `Ok(())` — The start nodes were replaced successfully
     ///
     /// # Note
     ///
     /// This method replaces **all** existing start nodes with the given
     /// collection. If you need to add a start node without clearing
     /// existing ones, use [`StateGraphBuilder::add_start_node`] before
-    /// compilation. The node names are not validated here — calling
-    /// `invoke` with non-existent start nodes will result in a runtime
-    /// error.
+    /// compilation. The node names are not validated here — unknown
+    /// nodes are silently skipped during execution (see
+    /// [`get_node_by_keys`]).
     ///
     /// # Example
     ///
@@ -425,13 +429,18 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// let mut builder = StateGraphBuilder::<DefaultMemoryState>::new();
     /// builder.add_node("node_a", Box::new(MyNode));
     /// builder.add_node("node_b", Box::new(MyNode));
+    /// builder.add_node("node_c", Box::new(MyNode));
     /// builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
     /// builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
     /// builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    /// builder.add_edge("node_c", HashSet::from(["__end__".to_string()]));
     /// let mut graph = builder.compile()?;
     ///
-    /// // Reconfigure to start from node_b instead of node_a
+    /// // Reconfigure to start from a single node
     /// graph.set_start_nodes(vec!["node_b".to_string()])?;
+    ///
+    /// // Or start from multiple nodes in parallel
+    /// graph.set_start_nodes(vec!["node_b".to_string(), "node_c".to_string()])?;
     /// # Ok(())
     /// # }
     /// ```

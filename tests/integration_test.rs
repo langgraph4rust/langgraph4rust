@@ -4217,7 +4217,8 @@ async fn test_set_start_nodes_replaces_default() -> Result<(), LangGraphError> {
 }
 
 /// 测试场景：多次调用 set_start_nodes，只有最后一次生效
-/// 验证 set_start_nodes 清空旧节点，只保留最新设置的节点
+/// 验证 set_start_nodes 清空旧节点，只保留最新设置的节点，
+/// 包括多节点被单节点替换、单节点被多节点替换的场景
 #[tokio::test]
 async fn test_set_start_nodes_last_call_wins() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
@@ -4238,7 +4239,7 @@ async fn test_set_start_nodes_last_call_wins() -> Result<(), LangGraphError> {
     builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
     let mut graph = builder.compile()?;
 
-    // 多次调用，最后一次应该生效
+    // 场景1：多次单节点调用，最后一次生效
     graph.set_start_nodes(vec!["node_a".to_string()])?;
     graph.set_start_nodes(vec!["node_b".to_string()])?;
     graph.set_start_nodes(vec!["node_a".to_string()])?;
@@ -4249,14 +4250,28 @@ async fn test_set_start_nodes_last_call_wins() -> Result<(), LangGraphError> {
     assert_eq!(
         msg,
         Some("node_a".to_string()),
-        "last call should determine the start node"
+        "last single-node call should determine the start node"
+    );
+
+    // 场景2：多节点被单节点替换
+    graph.set_start_nodes(vec!["node_a".to_string(), "node_b".to_string()])?;
+    graph.set_start_nodes(vec!["node_b".to_string()])?;
+
+    let state2 = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state2.clone()).await?;
+    let msg2: Option<String> = state2.get("message").await?;
+    assert_eq!(
+        msg2,
+        Some("node_b".to_string()),
+        "single-node should replace multi-node set"
     );
 
     Ok(())
 }
 
 /// 测试场景：set_start_nodes 设置为不存在的节点
-/// 验证设置不存在的起始节点后，invoke 静默完成（get_node_by_keys 会跳过未知节点）
+/// 验证设置不存在的起始节点后，invoke 静默完成（get_node_by_keys 会跳过未知节点），
+/// 混合有效+无效节点时，有效节点正常执行
 #[tokio::test]
 async fn test_set_start_nodes_nonexistent_node() -> Result<(), LangGraphError> {
     let mut builder = StateGraphBuilder::new();
@@ -4270,15 +4285,26 @@ async fn test_set_start_nodes_nonexistent_node() -> Result<(), LangGraphError> {
     builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
     let mut graph = builder.compile()?;
 
-    // 设置为不存在的节点
+    // 场景1：全部为不存在的节点
     graph.set_start_nodes(vec!["nonexistent".to_string()])?;
 
     let state = Arc::new(DefaultMemoryState::new());
-    // invoke 不会报错：get_node_by_keys 跳过未知节点，当前节点集为空，循环退出
     let result = graph.invoke(state).await;
     assert!(
         result.is_ok(),
         "invoke with nonexistent start node should complete silently"
+    );
+
+    // 场景2：混合有效+无效节点，有效节点应正常执行
+    graph.set_start_nodes(vec!["node_a".to_string(), "nonexistent".to_string()])?;
+
+    let state2 = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state2.clone()).await?;
+    let msg: Option<String> = state2.get("message").await?;
+    assert_eq!(
+        msg,
+        Some("node_a".to_string()),
+        "valid node should still execute alongside invalid ones"
     );
 
     Ok(())
@@ -4308,6 +4334,29 @@ async fn test_set_start_nodes_multiple_nodes() -> Result<(), LangGraphError> {
         count, 2,
         "both node_a and node_b should execute as start nodes"
     );
+
+    Ok(())
+}
+
+/// 测试场景：set_start_nodes 传入空 Vec
+/// 验证设置空起始节点后，invoke 直接退出，不执行任何节点
+#[tokio::test]
+async fn test_set_start_nodes_empty_vec() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    let mut graph = builder.compile()?;
+
+    // 设置为空 Vec
+    graph.set_start_nodes(Vec::new())?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // 不应该执行任何节点
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(count, 0, "no nodes should execute with empty start set");
 
     Ok(())
 }
