@@ -4202,7 +4202,7 @@ async fn test_set_start_nodes_replaces_default() -> Result<(), LangGraphError> {
     assert_eq!(msg, Some("node_a".to_string()), "should default to node_a");
 
     // 替换为从 node_b 开始
-    graph.set_start_nodes("node_b")?;
+    graph.set_start_nodes(vec!["node_b".to_string()])?;
 
     let state2 = Arc::new(DefaultMemoryState::new());
     graph.invoke(state2.clone()).await?;
@@ -4239,9 +4239,9 @@ async fn test_set_start_nodes_last_call_wins() -> Result<(), LangGraphError> {
     let mut graph = builder.compile()?;
 
     // 多次调用，最后一次应该生效
-    graph.set_start_nodes("node_a")?;
-    graph.set_start_nodes("node_b")?;
-    graph.set_start_nodes("node_a")?;
+    graph.set_start_nodes(vec!["node_a".to_string()])?;
+    graph.set_start_nodes(vec!["node_b".to_string()])?;
+    graph.set_start_nodes(vec!["node_a".to_string()])?;
 
     let state = Arc::new(DefaultMemoryState::new());
     graph.invoke(state.clone()).await?;
@@ -4271,7 +4271,7 @@ async fn test_set_start_nodes_nonexistent_node() -> Result<(), LangGraphError> {
     let mut graph = builder.compile()?;
 
     // 设置为不存在的节点
-    graph.set_start_nodes("nonexistent")?;
+    graph.set_start_nodes(vec!["nonexistent".to_string()])?;
 
     let state = Arc::new(DefaultMemoryState::new());
     // invoke 不会报错：get_node_by_keys 跳过未知节点，当前节点集为空，循环退出
@@ -4279,6 +4279,34 @@ async fn test_set_start_nodes_nonexistent_node() -> Result<(), LangGraphError> {
     assert!(
         result.is_ok(),
         "invoke with nonexistent start node should complete silently"
+    );
+
+    Ok(())
+}
+
+/// 测试场景：set_start_nodes 设置多个起始节点同时执行
+/// 验证传入 Vec 后清空旧节点，所有新节点都作为起始节点并行执行
+#[tokio::test]
+async fn test_set_start_nodes_multiple_nodes() -> Result<(), LangGraphError> {
+    let mut builder = StateGraphBuilder::new();
+    builder.add_node("node_a", Box::new(CounterNode));
+    builder.add_node("node_b", Box::new(CounterNode));
+    builder.add_edge("__start__", HashSet::from(["node_a".to_string()]));
+    builder.add_edge("node_a", HashSet::from(["__end__".to_string()]));
+    builder.add_edge("node_b", HashSet::from(["__end__".to_string()]));
+    let mut graph = builder.compile()?;
+
+    // 设置两个起始节点同时执行
+    graph.set_start_nodes(vec!["node_a".to_string(), "node_b".to_string()])?;
+
+    let state = Arc::new(DefaultMemoryState::new());
+    graph.invoke(state.clone()).await?;
+
+    // 两个 CounterNode 并行执行，count 应该为 2
+    let count: i32 = state.get("count").await?.unwrap_or(0);
+    assert_eq!(
+        count, 2,
+        "both node_a and node_b should execute as start nodes"
     );
 
     Ok(())
@@ -4302,7 +4330,7 @@ async fn test_set_start_nodes_preserves_graph_structure() -> Result<(), LangGrap
     let mut graph = builder.compile()?;
 
     // 修改起始节点为 node_b，跳过 node_a
-    graph.set_start_nodes("node_b")?;
+    graph.set_start_nodes(vec!["node_b".to_string()])?;
 
     let state = Arc::new(DefaultMemoryState::new());
     graph.invoke(state.clone()).await?;

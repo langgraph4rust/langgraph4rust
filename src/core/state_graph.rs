@@ -379,29 +379,30 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
         self.nodes.get(key).map(|node| node.as_ref())
     }
 
-    /// Replace the start node set with a single node.
+    /// Replace the start node set with a collection of nodes.
     ///
-    /// Clears all existing start nodes and sets the entry point to the
-    /// given node name. This allows reconfiguring the graph's entry point
+    /// Clears all existing start nodes and sets the entry points to the
+    /// given node names. This allows reconfiguring the graph's entry points
     /// after compilation, which is useful for replay, branching, or
-    /// testing scenarios where you want to start execution from a
-    /// different node without rebuilding the entire graph.
+    /// testing scenarios where you want to start execution from different
+    /// nodes without rebuilding the entire graph.
     ///
     /// # Arguments
     ///
-    /// * `key` - The name of the node to set as the sole start node
+    /// * `keys` - The names of the nodes to set as the start nodes
     ///
     /// # Returns
     ///
-    /// - `Ok(())` - The start node was replaced successfully
+    /// - `Ok(())` - The start nodes were replaced successfully
     ///
     /// # Note
     ///
-    /// This method replaces **all** existing start nodes with a single
-    /// node. If you need to add a start node without clearing existing
-    /// ones, use [`StateGraphBuilder::add_start_node`] before compilation.
-    /// The node name is not validated here — calling `invoke` with a
-    /// non-existent start node will result in a runtime error.
+    /// This method replaces **all** existing start nodes with the given
+    /// collection. If you need to add a start node without clearing
+    /// existing ones, use [`StateGraphBuilder::add_start_node`] before
+    /// compilation. The node names are not validated here — calling
+    /// `invoke` with non-existent start nodes will result in a runtime
+    /// error.
     ///
     /// # Example
     ///
@@ -430,13 +431,13 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// let mut graph = builder.compile()?;
     ///
     /// // Reconfigure to start from node_b instead of node_a
-    /// graph.set_start_nodes("node_b")?;
+    /// graph.set_start_nodes(vec!["node_b".to_string()])?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_start_nodes(&mut self, key: &str) -> Result<(), LangGraphError> {
+    pub fn set_start_nodes(&mut self, keys: Vec<String>) -> Result<(), LangGraphError> {
         self.start_nodes.clear();
-        self.start_nodes.insert(key.to_owned());
+        self.start_nodes.extend(keys);
         Ok(())
     }
 
