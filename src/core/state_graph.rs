@@ -430,13 +430,13 @@ impl<S: AgentState + Send + Sync> StateGraph<S> {
     /// let mut graph = builder.compile()?;
     ///
     /// // Reconfigure to start from node_b instead of node_a
-    /// graph.set_start_nodes(&"node_b".to_string())?;
+    /// graph.set_start_nodes("node_b")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_start_nodes(&mut self, key: &String) -> Result<(), LangGraphError> {
+    pub fn set_start_nodes(&mut self, key: &str) -> Result<(), LangGraphError> {
         self.start_nodes.clear();
-        self.start_nodes.insert(key.clone());
+        self.start_nodes.insert(key.to_owned());
         Ok(())
     }
 

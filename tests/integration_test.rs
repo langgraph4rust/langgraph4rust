@@ -4202,7 +4202,7 @@ async fn test_set_start_nodes_replaces_default() -> Result<(), LangGraphError> {
     assert_eq!(msg, Some("node_a".to_string()), "should default to node_a");
 
     // 替换为从 node_b 开始
-    graph.set_start_nodes(&"node_b".to_string())?;
+    graph.set_start_nodes("node_b")?;
 
     let state2 = Arc::new(DefaultMemoryState::new());
     graph.invoke(state2.clone()).await?;
@@ -4239,9 +4239,9 @@ async fn test_set_start_nodes_last_call_wins() -> Result<(), LangGraphError> {
     let mut graph = builder.compile()?;
 
     // 多次调用，最后一次应该生效
-    graph.set_start_nodes(&"node_a".to_string())?;
-    graph.set_start_nodes(&"node_b".to_string())?;
-    graph.set_start_nodes(&"node_a".to_string())?;
+    graph.set_start_nodes("node_a")?;
+    graph.set_start_nodes("node_b")?;
+    graph.set_start_nodes("node_a")?;
 
     let state = Arc::new(DefaultMemoryState::new());
     graph.invoke(state.clone()).await?;
@@ -4271,7 +4271,7 @@ async fn test_set_start_nodes_nonexistent_node() -> Result<(), LangGraphError> {
     let mut graph = builder.compile()?;
 
     // 设置为不存在的节点
-    graph.set_start_nodes(&"nonexistent".to_string())?;
+    graph.set_start_nodes("nonexistent")?;
 
     let state = Arc::new(DefaultMemoryState::new());
     // invoke 不会报错：get_node_by_keys 跳过未知节点，当前节点集为空，循环退出
@@ -4302,7 +4302,7 @@ async fn test_set_start_nodes_preserves_graph_structure() -> Result<(), LangGrap
     let mut graph = builder.compile()?;
 
     // 修改起始节点为 node_b，跳过 node_a
-    graph.set_start_nodes(&"node_b".to_string())?;
+    graph.set_start_nodes("node_b")?;
 
     let state = Arc::new(DefaultMemoryState::new());
     graph.invoke(state.clone()).await?;
